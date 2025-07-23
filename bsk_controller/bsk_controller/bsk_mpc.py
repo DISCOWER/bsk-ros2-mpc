@@ -40,8 +40,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from nav_msgs.msg import Path, Odometry
-from geometry_msgs.msg import PoseStamped
-from visualization_msgs.msg import Marker
+from geometry_msgs.msg import PoseStamped, TwistStamped, Vector3Stamped
 from bsk_msgs.msg import CmdForceBodyMsgPayload, CmdTorqueBodyMsgPayload, SCStatesMsgPayload, THRArrayCmdForceMsgPayload, HillRelStateMsgPayload
 from .tools.path_tools import sample_other_path
 from .tools.utils import MRP2quat
@@ -89,7 +88,9 @@ class BskMpc(Node):
         self.vehicle_angular_velocity = np.array([0.0, 0.0, 0.0])
         self.vehicle_local_velocity = np.array([0.0, 0.0, 0.0])
         self.setpoint_position = np.array([0.0, 0.0, 0.0])
+        self.setpoint_velocity = np.array([0.0, 0.0, 0.0])
         self.setpoint_attitude = np.array([1.0, 0.0, 0.0, 0.0])
+        self.setpoint_angular_velocity = np.array([0.0, 0.0, 0.0])
 
         # Initialize others' odometry and predicted path
         self.others = {
@@ -161,9 +162,29 @@ class BskMpc(Node):
             Path,
             'bsk_mpc/predicted_path',
             10)
-        self.reference_pub = self.create_publisher(
-            Marker,
-            'bsk_mpc/reference',
+        self.ref_pose_pub = self.create_publisher(
+            PoseStamped,
+            'bsk_mpc/ref_pose',
+            10)
+        self.ref_velocity_pub = self.create_publisher(
+            Vector3Stamped,
+            'bsk_mpc/ref_velocity',
+            10)
+        self.ref_angular_velocity_pub = self.create_publisher(
+            Vector3Stamped,
+            'bsk_mpc/ref_angular_velocity',
+            10)
+        self.vehicle_pose_pub = self.create_publisher(
+            PoseStamped,
+            'bsk_mpc/vehicle_pose',
+            10)
+        self.vehicle_velocity_pub = self.create_publisher(
+            Vector3Stamped,
+            'bsk_mpc/vehicle_velocity',
+            10)
+        self.vehicle_angular_velocity_pub = self.create_publisher(
+            Vector3Stamped,
+            'bsk_mpc/vehicle_angular_velocity',
             10)
         if self.type == 'da':
             self.publisher_thruster_array_cmd = self.create_publisher(
@@ -236,29 +257,71 @@ class BskMpc(Node):
             pred['timestamps'].append(timestamp_ns)
             pred['positions'].append(pos)
 
-    def publish_reference(self, pub, reference):
-        msg = Marker()
-        msg.action = Marker.ADD
-        msg.header.frame_id = "map"
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.ns = "arrow"
-        msg.id = 1
-        msg.type = Marker.SPHERE
-        msg.scale.x = 0.5
-        msg.scale.y = 0.5
-        msg.scale.z = 0.5
-        msg.color.r = 1.0
-        msg.color.g = 0.0
-        msg.color.b = 0.0
-        msg.color.a = 1.0
-        msg.pose.position.x = reference[0]
-        msg.pose.position.y = reference[1]
-        msg.pose.position.z = reference[2]
-        msg.pose.orientation.w = 1.0
-        msg.pose.orientation.x = 0.0
-        msg.pose.orientation.y = 0.0
-        msg.pose.orientation.z = 0.0
-        pub.publish(msg)
+    def publish_reference(self, reference_position, reference_velocity, reference_attitude, reference_angular_rate):
+        # Publish pose (position + attitude)
+        pose_msg = PoseStamped()
+        pose_msg.header.stamp = self.get_clock().now().to_msg()
+        pose_msg.header.frame_id = "map"
+        pose_msg.pose.position.x = float(reference_position[0])
+        pose_msg.pose.position.y = float(reference_position[1])
+        pose_msg.pose.position.z = float(reference_position[2])
+        sign = 1.0 if reference_attitude[0] >= 0 else -1.0
+        pose_msg.pose.orientation.w = sign * float(reference_attitude[0])
+        pose_msg.pose.orientation.x = sign * float(reference_attitude[1])
+        pose_msg.pose.orientation.y = sign * float(reference_attitude[2])
+        pose_msg.pose.orientation.z = sign * float(reference_attitude[3])
+        self.ref_pose_pub.publish(pose_msg)
+
+        # Publish velocity
+        twist_msg = Vector3Stamped()
+        twist_msg.header.stamp = pose_msg.header.stamp
+        twist_msg.header.frame_id = "map"
+        twist_msg.vector.x = float(reference_velocity[0])
+        twist_msg.vector.y = float(reference_velocity[1])
+        twist_msg.vector.z = float(reference_velocity[2])
+        self.ref_velocity_pub.publish(twist_msg)
+
+        # Publish angular velocity
+        angular_velocity_msg = Vector3Stamped()
+        angular_velocity_msg.header.stamp = pose_msg.header.stamp
+        angular_velocity_msg.header.frame_id = "map"
+        angular_velocity_msg.vector.x = float(reference_angular_rate[0])
+        angular_velocity_msg.vector.y = float(reference_angular_rate[1])
+        angular_velocity_msg.vector.z = float(reference_angular_rate[2])
+        self.ref_angular_velocity_pub.publish(angular_velocity_msg)
+
+    def publish_current_state(self, position, velocity, attitude, angular_rate):
+        # Publish current pose (position + attitude)
+        pose_msg = PoseStamped()
+        pose_msg.header.stamp = self.get_clock().now().to_msg()
+        pose_msg.header.frame_id = "map"
+        pose_msg.pose.position.x = float(position[0])
+        pose_msg.pose.position.y = float(position[1])
+        pose_msg.pose.position.z = float(position[2])
+        sign = 1.0 if attitude[0] >= 0 else -1.0
+        pose_msg.pose.orientation.w = sign * float(attitude[0])
+        pose_msg.pose.orientation.x = float(attitude[1])
+        pose_msg.pose.orientation.y = float(attitude[2])
+        pose_msg.pose.orientation.z = float(attitude[3])
+        self.vehicle_pose_pub.publish(pose_msg)
+
+        # Publish velocity
+        velocity_msg = Vector3Stamped()
+        velocity_msg.header.stamp = pose_msg.header.stamp
+        velocity_msg.header.frame_id = "map"
+        velocity_msg.vector.x = float(velocity[0])
+        velocity_msg.vector.y = float(velocity[1])
+        velocity_msg.vector.z = float(velocity[2])
+        self.vehicle_velocity_pub.publish(velocity_msg)
+
+        # Publish angular velocity
+        angular_velocity_msg = Vector3Stamped()
+        angular_velocity_msg.header.stamp = pose_msg.header.stamp
+        angular_velocity_msg.header.frame_id = "map"
+        angular_velocity_msg.vector.x = float(angular_rate[0])
+        angular_velocity_msg.vector.y = float(angular_rate[1])
+        angular_velocity_msg.vector.z = float(angular_rate[2])
+        self.vehicle_angular_velocity_pub.publish(angular_velocity_msg)
 
     def publish_thruster_cmd(self, u):
         Fthr = 1.5
@@ -372,8 +435,23 @@ class BskMpc(Node):
             raise ValueError(f'Invalid type: {self.type}')
 
 
-        self.publish_predicted_path(x_pred, self.setpoint_attitude)
-        self.publish_reference(self.reference_pub, self.setpoint_position)
+        self.publish_predicted_path(
+            x_pred,
+            self.setpoint_attitude
+        )
+        
+        self.publish_reference(
+            self.setpoint_position,
+            self.setpoint_velocity,
+            self.setpoint_attitude,
+            self.setpoint_angular_velocity
+        )
+        self.publish_current_state(
+            self.vehicle_local_position,
+            self.vehicle_local_velocity,
+            self.vehicle_attitude,
+            self.vehicle_angular_velocity
+        )
 
         if self.type == 'da' or self.type == 'avoidance_mpc':
             self.publish_thruster_cmd(self.control)

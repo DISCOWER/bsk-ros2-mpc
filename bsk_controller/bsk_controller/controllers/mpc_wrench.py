@@ -48,9 +48,9 @@ class MpcWrench():
         self.Nx = 30                # Prediction horizon, states             
         self.Q = np.diag([          # State weighting matrix
             1e0, 1e0, 1e0,
-            2e0, 2e0, 1e0, 
-            1e2, 
-            5e0, 5e0, 5e0])             
+            2e1, 2e1, 1e1, 
+            1e3, 
+            1e2, 1e2, 1e2])             
         self.R = np.diag([          # State weighting matrix
             1e0, 1e0, 1e0,
             1e0, 1e0, 1e0]) 

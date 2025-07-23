@@ -57,9 +57,6 @@ class BskMpc(Node):
         # Get use_hill (true/false)
         self.use_hill = self.declare_parameter('use_hill', False).value
 
-        # Get setpoint from rviz (true/false)
-        self.setpoint_from_rviz = self.declare_parameter('setpoint_from_rviz', False).value
-
         # Get names of other spacecraft
         self.name_others = self.declare_parameter('name_others', '').value
         self.name_others = self.name_others.split() if self.name_others else []
@@ -152,22 +149,13 @@ class BskMpc(Node):
                 self.hill_state_callback,
                 10
             )
-
-        if self.setpoint_from_rviz:
-            from mpc_msgs.srv import SetPose
-            self.set_pose_srv = self.create_service(
-                SetPose,
-                'set_pose',
-                self.add_set_pos_callback
-            )
-        else:
-            self.setpoint_pose_sub = self.create_subscription(
-                PoseStamped,
-                'bsk_mpc/setpoint_pose',
-                self.get_setpoint_pose_callback,
-                0
-            )
-        
+        self.setpoint_pose_sub = self.create_subscription(
+            PoseStamped,
+            'bsk_mpc/setpoint_pose',
+            self.get_setpoint_pose_callback,
+            0
+        )
+    
         # Publishers
         self.predicted_path_pub = self.create_publisher(
             Path,

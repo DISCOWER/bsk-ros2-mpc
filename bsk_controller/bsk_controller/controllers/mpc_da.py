@@ -58,9 +58,9 @@ class MpcDa():
         self.x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         
         # Bounds
-        self.lbx = np.array([-5, -5, -5, -1, -1, -1])
-        self.ubx = np.array([5, 5, 5, 1, 1, 1])
-        self.idxbx = np.array([3, 4, 5, 10, 11, 12]) # Indexes of states with constraints
+        self.lbx = np.array([]) #np.array([-5, -5, -5, -1, -1, -1])
+        self.ubx = np.array([]) #np.array([5, 5, 5, 1, 1, 1])
+        self.idxbx = np.array([]) #np.array([3, 4, 5, 10, 11, 12]) # Indexes of states with constraints
 
         # Weight on slack variables
         self.W_slack = np.array([1e6]*len(self.idxbx))

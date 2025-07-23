@@ -12,7 +12,6 @@ setup(
         ('share/ament_index/resource_index/packages', [f'resource/{package_name}']),
         (f'share/{package_name}', ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('bsk_controller/launch/*.launch.py')),
-        (os.path.join('share', package_name, 'rviz'), glob('bsk_controller/config/*.rviz')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -23,7 +22,6 @@ setup(
     entry_points={
         'console_scripts': [
             'bsk_mpc = bsk_controller.bsk_mpc:main',
-            'rviz_pos_marker = bsk_controller.rviz_pos_marker:main',
         ],
     },
 )

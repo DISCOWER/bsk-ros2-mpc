@@ -17,7 +17,6 @@ This package depends on `acados`. Follow the official [installation guide](https
 Clone this repo and the following dependencies into your ROS 2 workspace:
 
 * [bsk\_msgs](https://github.com/E-Krantz/bsk_msgs.git)
-* TODO: bsk-offboard (optional; used for RViz visualisation and control)
 
 Build the workspace:
 

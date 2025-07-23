@@ -36,13 +36,9 @@ __author__ = "Elias Krantz"
 __contact__ = "eliaskra@kth.se"
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
-from launch.conditions import IfCondition
 from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory
-import os
-import tempfile
 
 
 def generate_launch_description():
@@ -61,11 +57,6 @@ def generate_launch_description():
         default_value='False',
         description='Use Hill frame for MPC'
     )
-    setpoint_from_rviz_arg = DeclareLaunchArgument(
-        'setpoint_from_rviz',
-        default_value='False',
-        description='Publish setpoint pose via rviz'
-    )
     name_others_arg = DeclareLaunchArgument(
         'name_others',
         default_value='',
@@ -74,14 +65,12 @@ def generate_launch_description():
     namespace = LaunchConfiguration('namespace')
     type = LaunchConfiguration('type')
     use_hill = LaunchConfiguration('use_hill')
-    setpoint_from_rviz = LaunchConfiguration('setpoint_from_rviz')
     name_others = LaunchConfiguration('name_others')
 
     return LaunchDescription([
         namespace_arg,
         type_arg,
         use_hill_arg,
-        setpoint_from_rviz_arg,
         name_others_arg,
 
         # Launch MPC
@@ -95,69 +84,7 @@ def generate_launch_description():
             parameters=[
                 {'type': type},
                 {'use_hill': use_hill},
-                {'setpoint_from_rviz': setpoint_from_rviz},
                 {'name_others': name_others}
             ]
         ),
-        # Launch RViz marker input (only if using RViz to control)
-        Node(
-            package='bsk_controller',
-            namespace=namespace,
-            executable='rviz_pos_marker',
-            name='rviz_pos_marker',
-            output='screen',
-            emulate_tty=True,
-            parameters=[{'namespace': namespace}],
-            condition=IfCondition(setpoint_from_rviz)
-        ),
-        # Always launch main robot visualiser
-        # Node(
-        #     package='bsk_offboard',
-        #     namespace=namespace,
-        #     executable='visualizer',
-        #     name='visualizer',
-        #     parameters=[{'namespace': namespace}],
-        #     output='screen'
-        # ),
-        # Launch visualisers for others + RViz
-        # OpaqueFunction(function=launch_visualizers_and_rviz),
     ])
-
-
-def patch_rviz_config(template_path, ns):
-    with open(template_path, 'r') as f:
-        content = f.read()
-
-    content = content.replace('__NS__', f'/{ns}' if ns else '')
-
-    tmp_config = tempfile.NamedTemporaryFile(delete=False, suffix='.rviz')
-    tmp_config.write(content.encode('utf-8'))
-    tmp_config.close()
-
-    return tmp_config.name
-
-
-def launch_visualizers_and_rviz(context, *args, **kwargs):
-    namespace = LaunchConfiguration('namespace').perform(context)
-    setpoint_from_rviz = LaunchConfiguration('setpoint_from_rviz').perform(context)
-
-    # Choose config depending on RViz control
-    base_config_name = 'config.rviz' if setpoint_from_rviz == 'true' else 'config_nomarker.rviz'
-
-    rviz_config_path = os.path.join(
-        get_package_share_directory('bsk_controller'),
-        'rviz',
-        base_config_name
-    )
-    patched_config = patch_rviz_config(rviz_config_path, namespace)
-
-    return [
-        Node(
-            package='rviz2',
-            namespace='',
-            executable='rviz2',
-            name='rviz2',
-            arguments=['-d', patched_config],
-            output='screen'
-        )
-    ]

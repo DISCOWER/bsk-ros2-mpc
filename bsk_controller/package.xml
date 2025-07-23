@@ -9,8 +9,6 @@
   <buildtool_depend>ament_python</buildtool_depend>
 
   <exec_depend>bsk_msgs</exec_depend>
-  <exec_depend>rviz_msgs</exec_depend>
-  <!-- <exec_depend>bsk_offboard</exec_depend> -->
   <exec_depend>launch</exec_depend>
 
   <test_depend>ament_copyright</test_depend>

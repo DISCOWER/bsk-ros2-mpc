@@ -162,18 +162,6 @@ class BskMpc(Node):
             Path,
             'bsk_mpc/predicted_path',
             10)
-        self.ref_pose_pub = self.create_publisher(
-            PoseStamped,
-            'bsk_mpc/ref_pose',
-            10)
-        self.ref_velocity_pub = self.create_publisher(
-            Vector3Stamped,
-            'bsk_mpc/ref_velocity',
-            10)
-        self.ref_angular_velocity_pub = self.create_publisher(
-            Vector3Stamped,
-            'bsk_mpc/ref_angular_velocity',
-            10)
         self.vehicle_pose_pub = self.create_publisher(
             PoseStamped,
             'bsk_mpc/vehicle_pose',
@@ -204,7 +192,7 @@ class BskMpc(Node):
                 10
             )
         else:
-            self.get_logger().error(f"Unknown type: {self.type}. Use 'direct_allocation' or 'wrench'.")
+            self.get_logger().error(f"Unknown type: {self.type}. Use 'da' or 'wrench'.")
             return
 
     def state_callback(self, msg: SCStatesMsgPayload):
@@ -215,7 +203,8 @@ class BskMpc(Node):
             self.vehicle_local_position = msg.r_bn_n
             self.vehicle_local_velocity = msg.v_bn_n
         sigma_bn = np.array(msg.sigma_bn)
-        self.vehicle_attitude = MRP2quat(sigma_bn)
+        q_bn = MRP2quat(sigma_bn, ref_quat=self.setpoint_attitude)
+        self.vehicle_attitude = q_bn
         self.vehicle_angular_velocity = msg.omega_bn_b
     
     def hill_state_callback(self, msg: HillRelStateMsgPayload):
@@ -265,11 +254,10 @@ class BskMpc(Node):
         pose_msg.pose.position.x = float(reference_position[0])
         pose_msg.pose.position.y = float(reference_position[1])
         pose_msg.pose.position.z = float(reference_position[2])
-        sign = 1.0 if reference_attitude[0] >= 0 else -1.0
-        pose_msg.pose.orientation.w = sign * float(reference_attitude[0])
-        pose_msg.pose.orientation.x = sign * float(reference_attitude[1])
-        pose_msg.pose.orientation.y = sign * float(reference_attitude[2])
-        pose_msg.pose.orientation.z = sign * float(reference_attitude[3])
+        pose_msg.pose.orientation.w = float(reference_attitude[0])
+        pose_msg.pose.orientation.x = float(reference_attitude[1])
+        pose_msg.pose.orientation.y = float(reference_attitude[2])
+        pose_msg.pose.orientation.z = float(reference_attitude[3])
         self.ref_pose_pub.publish(pose_msg)
 
         # Publish velocity
@@ -298,8 +286,7 @@ class BskMpc(Node):
         pose_msg.pose.position.x = float(position[0])
         pose_msg.pose.position.y = float(position[1])
         pose_msg.pose.position.z = float(position[2])
-        sign = 1.0 if attitude[0] >= 0 else -1.0
-        pose_msg.pose.orientation.w = sign * float(attitude[0])
+        pose_msg.pose.orientation.w = float(attitude[0])
         pose_msg.pose.orientation.x = float(attitude[1])
         pose_msg.pose.orientation.y = float(attitude[2])
         pose_msg.pose.orientation.z = float(attitude[3])
@@ -433,25 +420,6 @@ class BskMpc(Node):
 
         else:
             raise ValueError(f'Invalid type: {self.type}')
-
-
-        self.publish_predicted_path(
-            x_pred,
-            self.setpoint_attitude
-        )
-        
-        self.publish_reference(
-            self.setpoint_position,
-            self.setpoint_velocity,
-            self.setpoint_attitude,
-            self.setpoint_angular_velocity
-        )
-        self.publish_current_state(
-            self.vehicle_local_position,
-            self.vehicle_local_velocity,
-            self.vehicle_attitude,
-            self.vehicle_angular_velocity
-        )
 
         if self.type == 'da' or self.type == 'avoidance_mpc':
             self.publish_thruster_cmd(self.control)

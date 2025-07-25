@@ -19,7 +19,7 @@ def quat_mult(q1, q2):
 def quat_derivative(q, w):
     return 0.5 * quat_mult(np.array([0, *w]), q)
 
-def MRP2quat(sigma):
+def MRP2quat(sigma, ref_quat=None):
     """
     Converts Modified Rodrigues Parameters (MRP) vector sigma
     to quaternion vector q.
@@ -36,9 +36,18 @@ def MRP2quat(sigma):
     """
     sigma = np.asarray(sigma)
     s2 = np.dot(sigma, sigma)
+    if s2 > 1:
+        sigma = -sigma / s2
+        s2 = np.dot(sigma, sigma)
     denom = 1 + s2
     qw = (1 - s2) / denom
     qx = 2 * sigma[0] / denom
     qy = 2 * sigma[1] / denom
     qz = 2 * sigma[2] / denom
-    return np.hstack((qw, qx, qy, qz))
+    quat = np.hstack((qw, qx, qy, qz))
+    quat = quat / np.linalg.norm(quat)
+
+    if ref_quat is not None and np.dot(quat, ref_quat) < 0:
+        # Enforce sign consistency
+        quat = -quat
+    return quat

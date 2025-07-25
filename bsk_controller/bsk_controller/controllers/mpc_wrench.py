@@ -44,29 +44,20 @@ from ..models.bsk_model_wrench import bsk_model_wrench
 class MpcWrench():
     def __init__(self):
         # Define the controller parameters
-        self.dt = 0.5               # MPC time step [s]
+        self.dt = 0.1               # MPC time step [s]
         self.Nx = 30                # Prediction horizon, states             
         self.Q = np.diag([          # State weighting matrix
             1e0, 1e0, 1e0,
-            2e1, 2e1, 1e1, 
-            1e3, 
-            1e2, 1e2, 1e2])             
+            3e1, 3e1, 3e1, 
+            5e3, 
+            5e0, 5e0, 5e0])            
         self.R = np.diag([          # State weighting matrix
-            1e0, 1e0, 1e0,
-            1e0, 1e0, 1e0]) 
+            5e-1, 5e-1, 5e-1,
+            5e1, 5e1, 5e1]) 
         self.P = 20 * self.Q        # Terminal state weighting matrix
 
         # Initial state (position, velocity, quaternion, angular velocity)
         self.x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        
-        # State constraints
-        self.lbx = np.array([-5, -5, -5, -1, -1, -1])
-        self.ubx = np.array([5, 5, 5, 1, 1, 1])
-        self.idxbx = np.array([3, 4, 5, 10, 11, 12]) # Indexes of states with constraints
-
-        # Weight on slack variables
-        self.W_slack = np.array([1e6]*len(self.idxbx))
-        self.idx_slack = np.array([0, 1, 2, 3, 4, 5]) # Indexes of slack variables
 
         # Create the OCP
         self.solver = self.setup()
@@ -106,7 +97,7 @@ class MpcWrench():
         ocp.cost.W = block_diag(self.Q, self.R)
         ocp.cost.W_e = block_diag(self.P)
 
-        quat_error = (model.x[6:10].T @ x_ref[6:10])**2
+        quat_error = 1 - (model.x[6:10].T @ x_ref[6:10])**2
         ocp.model.cost_y_expr = ca.vertcat(
             model.x[0:3] - x_ref[0:3],   # Position error
             model.x[3:6] - x_ref[3:6],   # Velocity error
@@ -122,36 +113,12 @@ class MpcWrench():
             model.x[10:13] - x_ref[10:13],
         )
         ocp.cost.yref = np.zeros(ocp.model.cost_y_expr.shape[0])  # Reference for full cost function
-        ocp.cost.yref[6] = 1    # Quaternion reference
         ocp.cost.yref_e = np.zeros(ocp.model.cost_y_expr_e.shape[0])  # Terminal reference
-        ocp.cost.yref_e[6] = 1  # Quaternion reference
 
         # Set constraints on U
         ocp.constraints.lbu = model.u_min
         ocp.constraints.ubu = model.u_max
-        ocp.constraints.idxbu = np.arange(nu)
-
-        # Set constraints on X
-        ocp.constraints.lbx = self.lbx
-        ocp.constraints.ubx = self.ubx
-        ocp.constraints.idxbx = self.idxbx  # All states are bounded
-
-        # Set constraints on X_e
-        ocp.constraints.lbx_e = self.lbx
-        ocp.constraints.ubx_e = self.ubx
-        ocp.constraints.idxbx_e = self.idxbx
-
-        # Set soft constraints
-        ocp.constraints.idxsbx = np.arange(len(ocp.constraints.idxbx))
-        ocp.cost.Zl = self.W_slack
-        ocp.cost.Zu = self.W_slack
-        ocp.cost.zl = np.zeros(self.idx_slack.size)
-        ocp.cost.zu = np.zeros(self.idx_slack.size)
-        ocp.constraints.idxsbx_e = np.arange(len(ocp.constraints.idxbx_e))
-        ocp.cost.Zl_e = ocp.cost.Zl
-        ocp.cost.Zu_e = ocp.cost.Zu
-        ocp.cost.zl_e = ocp.cost.zl
-        ocp.cost.zu_e = ocp.cost.zu        
+        ocp.constraints.idxbu = np.arange(nu)      
 
         # Set initial state
         ocp.constraints.x0 = self.x0

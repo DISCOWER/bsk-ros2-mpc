@@ -57,21 +57,21 @@ def generate_launch_description():
         default_value='False',
         description='Use Hill frame for MPC'
     )
-    name_others_arg = DeclareLaunchArgument(
-        'name_others',
+    name_leader_arg = DeclareLaunchArgument(
+        'name_leader',
         default_value='',
-        description='Namespaces of other spacecraft, separated by space'
+        description='Namespace of the leader spacecraft'
     )
     namespace = LaunchConfiguration('namespace')
     type = LaunchConfiguration('type')
     use_hill = LaunchConfiguration('use_hill')
-    name_others = LaunchConfiguration('name_others')
+    name_leader = LaunchConfiguration('name_leader')
 
     return LaunchDescription([
         namespace_arg,
         type_arg,
         use_hill_arg,
-        name_others_arg,
+        name_leader_arg,
 
         # Launch MPC
         Node(
@@ -84,7 +84,7 @@ def generate_launch_description():
             parameters=[
                 {'type': type},
                 {'use_hill': use_hill},
-                {'name_others': name_others}
+                {'name_leader': name_leader}
             ]
         ),
     ])

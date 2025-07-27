@@ -55,10 +55,8 @@ class BskMpc(Node):
         # Get use_hill (true/false)
         self.use_hill = self.declare_parameter('use_hill', False).value
 
-        # Get names of other spacecraft
-        self.name_others = self.declare_parameter('name_others', '').value
-        self.name_others = self.name_others.split() if self.name_others else []
-        self.n_others = len(self.name_others)
+        # Get name of leader spacecraft
+        self.name_leader = self.declare_parameter('name_leader', '').value
 
         # Setup publishers and subscribers
         self.set_publishers_subscribers()
@@ -71,17 +69,6 @@ class BskMpc(Node):
         timer_period_cmd = 0.2  # seconds
         self.timer_cmd = self.create_timer(timer_period_cmd, self.cmdloop_callback)
 
-        # Create Spacecraft and controller objects
-        if self.type == 'da':
-            from bsk_controller.controllers.mpc_da import MpcDa
-            self.mpc = MpcDa()
-            self.control = np.zeros((self.mpc.nu, 1))
-
-        elif self.type == 'wrench':
-            from bsk_controller.controllers.mpc_wrench import MpcWrench
-            self.mpc = MpcWrench()
-            self.control = np.zeros((self.mpc.nu, 1))
-
         self.vehicle_attitude = np.array([1.0, 0.0, 0.0, 0.0])
         self.vehicle_local_position = np.array([0.0, 0.0, 0.0])
         self.vehicle_angular_velocity = np.array([0.0, 0.0, 0.0])
@@ -90,22 +77,38 @@ class BskMpc(Node):
         self.setpoint_velocity = np.array([0.0, 0.0, 0.0])
         self.setpoint_attitude = np.array([1.0, 0.0, 0.0, 0.0])
         self.setpoint_angular_velocity = np.array([0.0, 0.0, 0.0])
+        self.received_first_setpoint = False
+
+        # Create Spacecraft and controller objects
+        if self.type == 'da':
+            from bsk_controller.controllers.mpc_da import MpcDa
+            self.mpc = MpcDa()
+            self.control = np.zeros((self.mpc.nu, 1))
+        elif self.type == 'wrench':
+            from bsk_controller.controllers.mpc_wrench import MpcWrench
+            self.mpc = MpcWrench()
+            self.control = np.zeros((self.mpc.nu, 1))
+        elif self.type == 'follower_wrench':
+            from bsk_controller.controllers.mpc_follower_wrench import MpcFollowerWrench
+            self.mpc = MpcFollowerWrench()
+            self.control = np.zeros((self.mpc.nu, 1))
 
         # Initialize others' odometry and predicted path
-        self.others = {
-            name: {
-                "odom": {
-                    "timestamp": np.zeros(1),
-                    "position": np.zeros(3),
-                    "velocity": np.zeros(3),
-                    # "acceleration": np.zeros(3),
-                },
-                "pred_path": {
-                    "timestamps": [],
-                    "positions": [],
-                }
+        self.leader = {
+            "state": {
+                "timestamp": np.zeros(1),
+                "position": np.zeros(3),
+                "velocity": np.zeros(3),
+                "attitude": np.zeros(4),
+                "angular_velocity": np.zeros(3),
+            },
+            "trajectory": {
+                "timestamps": [],
+                "position": [],
+                "velocity": [],
+                "attitude": [],
+                "angular_velocity": [],
             }
-            for name in self.name_others
         }
 
     def wait_for_clock(self):
@@ -159,10 +162,38 @@ class BskMpc(Node):
         self.setpoint_pose_sub = self.create_subscription(
             PoseStamped,
             'bsk_mpc/setpoint_pose',
-            self.get_setpoint_pose_callback,
+            self.setpoint_pose_callback,
             0
         )
-    
+        if self.type == 'follower_wrench':
+            if self.use_hill:
+                self.leader_hill_trans_sub = self.create_subscription(
+                    HillRelStateMsgPayload,
+                    f"/{self.name_leader}/bsk/out/hill_trans_state",
+                    self.leader_hill_trans_callback,
+                    10
+                )
+                self.leader_hill_rot_sub = self.create_subscription(
+                    AttGuidMsgPayload,
+                    f"/{self.name_leader}/bsk/out/hill_rot_state",
+                    self.leader_hill_rot_callback,
+                    10
+                )
+            else:
+                self.leader_state_sub = self.create_subscription(
+                    SCStatesMsgPayload,
+                    f"/{self.name_leader}/bsk/out/sc_states",
+                    self.leader_state_callback,
+                    10
+                )
+            self.leader_traj_sub = [
+                self.create_subscription(
+                Path,
+                f'/{self.name_leader}/bsk_mpc/predicted_path',
+                self.leader_pred_callback,
+                10)
+            ]
+
         # Publishers
         self.predicted_path_pub = self.create_publisher(
             Path,
@@ -198,7 +229,7 @@ class BskMpc(Node):
                 "bsk/in/thr_array_cmd_force", 
                 10
             )
-        elif self.type == 'wrench':
+        elif self.type == 'wrench' or self.type == 'follower_wrench':
             self.publisher_force_cmd = self.create_publisher(
                 CmdForceBodyMsgPayload, 
                 "bsk/in/cmd_force", 
@@ -226,7 +257,7 @@ class BskMpc(Node):
     def hill_trans_callback(self, msg: HillRelStateMsgPayload):
         # position and velocity in Hill frame
         self.vehicle_local_position = msg.r_dc_h
-        self.vehicle_local_velocity = msg.v_dc_h
+        self.vehicle_local_velocity = msg.v_dc_h            
 
     def hill_rot_callback(self, msg: AttGuidMsgPayload):
         # attitude in body to Hill frame
@@ -235,26 +266,36 @@ class BskMpc(Node):
         self.vehicle_attitude = q_nb
         self.vehicle_angular_velocity = msg.omega_br_b
 
-    def others_odom_callback(self, msg: Odometry, namespace):
-        odom = self.others[namespace]['odom']
-        timestamp = self.get_clock().now().nanoseconds   #1e9 * msg.header.stamp.sec + msg.header.stamp.nanosec
+    def leader_state_callback(self, msg: SCStatesMsgPayload):
+        # Update leader spacecraft state
+        self.leader["state"]["timestamp"] = msg.stamp.sec * 1_000_000_000 + msg.stamp.nanosec
+        self.leader["state"]["position"] = msg.r_bn_n
+        self.leader["state"]["velocity"] = msg.v_bn_n
+        q_nb = MRP2quat(np.array(msg.sigma_bn), ref_quat=self.vehicle_attitude)
+        self.leader["state"]["attitude"] = q_nb
+        self.leader["state"]["angular_velocity"] = msg.omega_bn_b
 
-        odom['position'][0] = msg.pose.pose.position.x
-        odom['position'][1] = msg.pose.pose.position.y
-        odom['position'][2] = msg.pose.pose.position.z
+    def leader_hill_trans_callback(self, msg: HillRelStateMsgPayload):
+        # position and velocity in Hill frame
+        self.leader["state"]["position"] = msg.r_dc_h
+        self.leader["state"]["velocity"] = msg.v_dc_h
+    
+    def leader_hill_rot_callback(self, msg: AttGuidMsgPayload):
+        # attitude in body to Hill frame
+        # angular velocity in body frame
+        q_nb = MRP2quat(np.array(msg.sigma_br), ref_quat=self.vehicle_attitude)
+        self.leader["state"]["attitude"] = q_nb
+        self.leader["state"]["angular_velocity"] = msg.omega_br_b
 
-        odom['velocity'][0] = msg.twist.twist.linear.x
-        odom['velocity'][1] = msg.twist.twist.linear.y
-        odom['velocity'][2] = msg.twist.twist.linear.z
-
-        odom['timestamp'] = timestamp
-
-    def others_pred_callback(self, msg: Path, namespace):
-        pred = self.others[namespace]['pred_path']
+    def leader_pred_callback(self, msg: Path, namespace):
+        pred = self.leader['trajectory']
 
         # Reset stored prediction
         pred['timestamps'].clear()
-        pred['positions'].clear()
+        pred['position'].clear()
+        pred['velocity'].clear()
+        pred['attitude'].clear()
+        pred['angular_velocity'].clear()
 
         for pose_stamped in msg.poses:
             t = pose_stamped.header.stamp
@@ -265,9 +306,40 @@ class BskMpc(Node):
                 pose_stamped.pose.position.y,
                 pose_stamped.pose.position.z
             ])
+            att = np.array([
+                pose_stamped.pose.orientation.w,
+                pose_stamped.pose.orientation.x,
+                pose_stamped.pose.orientation.y,
+                pose_stamped.pose.orientation.z
+            ])
+            vel = np.array([0.0]*3)  # Placeholder for velocity
+            ang_vel = np.array([0.0]*3)  # Placeholder for angular velocity
 
             pred['timestamps'].append(timestamp_ns)
-            pred['positions'].append(pos)
+            pred['position'].append(pos)
+            pred['velocity'].append(vel)
+            pred['attitude'].append(att)
+            pred['angular_velocity'].append(ang_vel)
+
+    def setpoint_pose_callback(self, msg):
+        self.setpoint_position[0] = msg.pose.position.x
+        self.setpoint_position[1] = msg.pose.position.y
+        self.setpoint_position[2] = msg.pose.position.z
+        self.setpoint_attitude[0] = msg.pose.orientation.w
+        self.setpoint_attitude[1] = msg.pose.orientation.x
+        self.setpoint_attitude[2] = msg.pose.orientation.y
+        self.setpoint_attitude[3] = msg.pose.orientation.z
+
+        # normalize setpoint attitude
+        norm = np.linalg.norm(self.setpoint_attitude)
+        if norm > 0:
+            self.setpoint_attitude /= norm
+        if np.dot(self.vehicle_attitude, self.setpoint_attitude) < 0:
+            self.setpoint_attitude = -self.setpoint_attitude
+
+        self.get_logger().info(f"Setpoint position: {self.setpoint_position}, attitude: {self.setpoint_attitude}")
+        self.get_logger().info(f"Position: {self.vehicle_local_position}, Attitude: {self.vehicle_attitude}")
+        self.received_first_setpoint = True
 
     def publish_reference(self, reference_position, reference_velocity, reference_attitude, reference_angular_rate):
         # Publish pose (position + attitude)
@@ -358,7 +430,7 @@ class BskMpc(Node):
         self.publisher_force_cmd.publish(force_msg)
         self.publisher_torque_cmd.publish(torque_msg)
 
-    def publish_predicted_path(self, x_pred, current_attitude):
+    def publish_predicted_path(self, x_pred):
         now = self.get_clock().now()
         predicted_path_msg = Path()
         predicted_path_msg.header.stamp = now.to_msg()
@@ -369,13 +441,16 @@ class BskMpc(Node):
             future_time = now + rclpy.duration.Duration(seconds=i * self.mpc.dt)
 
             # Create PoseStamped
-            pose_stamped = self.vector2PoseMsg('map', predicted_state[0:3], current_attitude)
+            pose_stamped = self.vector2PoseMsg('map', predicted_state[0:3], predicted_state[6:10])
             pose_stamped.header.stamp = future_time.to_msg()
-            pose_stamped.header.frame_id = 'map'
 
             predicted_path_msg.poses.append(pose_stamped)
+        self.predicted_path_pub.publish(predicted_path_msg)
 
     def cmdloop_callback(self):
+        if not self.received_first_setpoint:
+            return
+        
         x0 = np.array([self.vehicle_local_position[0],
                 self.vehicle_local_position[1],
                 self.vehicle_local_position[2],
@@ -400,86 +475,65 @@ class BskMpc(Node):
             
             # Get control input
             self.control, x_pred = self.mpc.get_input(x0, x_ref)
+
+            # Publish current state
+            self.publish_current_state(
+                position=self.vehicle_local_position,
+                velocity=self.vehicle_local_velocity,
+                attitude=self.vehicle_attitude,
+                angular_rate=self.vehicle_angular_velocity
+            )
+            # Publish reference state
+            self.publish_reference(
+                reference_position=self.setpoint_position,
+                reference_velocity=self.setpoint_velocity,
+                reference_attitude=self.setpoint_attitude,
+                reference_angular_rate=self.setpoint_angular_velocity
+            )
                                    
-        elif self.type == 'avoidance_mpc':
-            raise ValueError("Avoidance MPC is not implemented yet.")
-            x_ref = np.concatenate((self.setpoint_position,       # position
-                                  np.zeros(3),                  # velocity
-                                  self.setpoint_attitude,       # attitude
-                                  np.zeros(3)), axis=0)
-            
-            use_other_traj = True
-            if use_other_traj:
-                # Use predicted paths of other spacecraft
-                x_others = [
-                    sample_other_path(
-                        t0=self.get_clock().now().nanoseconds,
-                        dt=self.mpc.dt,
-                        Nx=self.mpc.Nx + 1,
-                        t_other=self.others[name]['pred_path']['timestamps'],
-                        pos_other=self.others[name]['pred_path']['positions'],
-                    )
-                    for name in self.name_others if self.others[name]['pred_path']['timestamps']
-                ]
+        elif self.type == 'follower_wrench':
+            if self.leader["trajectory"]["timestamps"] == []:
+                x_ref = np.concatenate((self.leader["state"]["position"] + self.setpoint_position,          # position
+                                    np.zeros(3),                                                          # velocity
+                                    self.setpoint_attitude,                                               # attitude
+                                    np.zeros(3)), axis=0)                                                 # angular velocity   
+                self.get_logger().warn("Leader trajectory is empty, using current leader state as reference.")
             else:
-                # Use current odometry of other spacecraft
-                x_others = [
-                    sample_other_path(
-                        t0=self.get_clock().now().nanoseconds,
-                        dt=self.mpc.dt,
-                        Nx=self.mpc.Nx + 1,
-                        t_other=[self.others[name]['odom']['timestamp']],
-                        pos_other=[self.others[name]['odom']['position']],
-                        vel_other=[self.others[name]['odom']['velocity']],
-                    )
-                    for name in self.name_others
-                ]
-            # Get control input
-            self.control, x_pred = self.mpc.get_input(x0, x_ref, x_others=x_others)
+                # Use leader's predicted trajectory
+                for i in range(len(self.leader["trajectory"]["timestamps"])):
+                    x_ref = np.concatenate((self.leader["trajectory"]["position"][i] + self.setpoint_position,  # position
+                                        self.leader["trajectory"]["velocity"][i],                               # velocity
+                                        self.setpoint_attitude,          # attitude
+                                        np.zeros(3)), axis=0)            # angular velocity
+
+            self.control, x_pred = self.mpc.get_input(x0, x_ref)
+
+            # Publish current state
+            self.publish_current_state(
+                position=self.vehicle_local_position,
+                velocity=self.vehicle_local_velocity,
+                attitude=self.vehicle_attitude,
+                angular_rate=self.vehicle_angular_velocity
+            )
+            # Publish reference state
+            self.publish_reference(
+                reference_position=self.setpoint_position + self.leader["state"]["position"],
+                reference_velocity=self.setpoint_velocity + self.leader["state"]["velocity"],
+                reference_attitude=self.setpoint_attitude,
+                reference_angular_rate=self.setpoint_angular_velocity
+            )
 
         else:
             raise ValueError(f'Invalid type: {self.type}')
 
-        if self.type == 'da' or self.type == 'avoidance_mpc':
+        if self.type == 'da':
             self.publish_thruster_cmd(self.control)
-        elif self.type == 'wrench':
+        elif self.type == 'wrench' or self.type == 'follower_wrench':
             self.publish_wrench_cmd(self.control)
 
-        # Publish current state
-        self.publish_current_state(
-            position=self.vehicle_local_position,
-            velocity=self.vehicle_local_velocity,
-            attitude=self.vehicle_attitude,
-            angular_rate=self.vehicle_angular_velocity
-        )
-        # Publish reference state
-        self.publish_reference(
-            reference_position=self.setpoint_position,
-            reference_velocity=self.setpoint_velocity,
-            reference_attitude=self.setpoint_attitude,
-            reference_angular_rate=self.setpoint_angular_velocity
-        )
-
-
-    def get_setpoint_pose_callback(self, msg):
-        self.setpoint_position[0] = msg.pose.position.x
-        self.setpoint_position[1] = msg.pose.position.y
-        self.setpoint_position[2] = msg.pose.position.z
-        self.setpoint_attitude[0] = msg.pose.orientation.w
-        self.setpoint_attitude[1] = msg.pose.orientation.x
-        self.setpoint_attitude[2] = msg.pose.orientation.y
-        self.setpoint_attitude[3] = msg.pose.orientation.z
-
-        # normalize setpoint attitude
-        norm = np.linalg.norm(self.setpoint_attitude)
-        if norm > 0:
-            self.setpoint_attitude /= norm
-        if np.dot(self.vehicle_attitude, self.setpoint_attitude) < 0:
-            self.setpoint_attitude = -self.setpoint_attitude
-
-        self.get_logger().info(f"Setpoint position: {self.setpoint_position}, attitude: {self.setpoint_attitude}")
-        self.get_logger().info(f"Position: {self.vehicle_local_position}, Attitude: {self.vehicle_attitude}")
-
+        # Publish predicted path
+        self.publish_predicted_path(x_pred)
+        
 
 def main(args=None):
     rclpy.init(args=args)

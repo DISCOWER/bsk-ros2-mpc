@@ -4,9 +4,9 @@ from geometry_msgs.msg import PoseStamped
 import math
 
 # Set these variables directly in the script (angles in degrees)
-namespace = "bskSat0"
+namespace = "pop"
 x = 0.0
-y = 0.0
+y = 5.0
 z = 0.0
 roll_deg = 0.0   # degrees
 pitch_deg = 0.0 # degrees

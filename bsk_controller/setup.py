@@ -22,6 +22,7 @@ setup(
     entry_points={
         'console_scripts': [
             'bsk_mpc = bsk_controller.bsk_mpc:main',
+            'bsk_mpc_px4 = bsk_controller.bsk_mpc_px4:main',
         ],
     },
 )

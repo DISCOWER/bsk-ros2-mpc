@@ -37,37 +37,58 @@ __contact__ = "eliaskra@kth.se"
 
 import numpy as np
 import rclpy
+from rclpy.clock import Clock
 from rclpy.node import Node
-from rclpy.parameter import Parameter
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped, Vector3Stamped
-from bsk_msgs.msg import CmdForceBodyMsgPayload, CmdTorqueBodyMsgPayload, SCStatesMsgPayload, THRArrayCmdForceMsgPayload, HillRelStateMsgPayload, AttGuidMsgPayload
-from .tools.utils import MRP2quat, sample_other_path
+from .tools.utils import sample_other_path
+
+from px4_msgs.msg import OffboardControlMode
+from px4_msgs.msg import VehicleStatus
+from px4_msgs.msg import VehicleAttitude
+from px4_msgs.msg import VehicleAngularVelocity
+from px4_msgs.msg import VehicleLocalPosition
+from px4_msgs.msg import ActuatorMotors
+from px4_msgs.msg import VehicleTorqueSetpoint
+from px4_msgs.msg import VehicleThrustSetpoint
+
+DATA_VALIDITY_STREAM = 0.5 # seconds, threshold for (pos,att,vel) messages
+DATA_VALIDITY_STATUS = 2.0 # seconds, threshold for status message
 
 class BskMpc(Node):
     def __init__(self):
-        super().__init__('bsk_mpc',
-                        parameter_overrides=[Parameter('use_sim_time', Parameter.Type.BOOL, True)])
+        super().__init__('bsk_mpc')
         
         # Get type
         self.type = self.declare_parameter('type', 'da').value
 
-        # Get use_hill (true/false)
-        self.use_hill = self.declare_parameter('use_hill', False).value
-
         # Get name of leader spacecraft
         self.name_leader = self.declare_parameter('name_leader', '').value
 
-        # Setup publishers and subscribers
-        self.set_publishers_subscribers()
+        # QoS profiles
+        qos_profile_pub = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=0
+        )
 
-        # Check if use_sim_time is enabled
-        if self.get_parameter('use_sim_time').get_parameter_value().bool_value:
-            self.get_logger().info("Using simulation time, waiting for /clock...")
-            self.wait_for_clock()
+        qos_profile_sub = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=0
+        )
+
+        # Setup publishers and subscribers
+        self.set_publishers_subscribers(qos_profile_pub, qos_profile_sub)
 
         timer_period_cmd = 0.2  # seconds
         self.timer_cmd = self.create_timer(timer_period_cmd, self.cmdloop_callback)
+
+        timer_offboard = 0.1  # seconds
+        self.timer_offboard = self.create_timer(timer_offboard, self.offboard_control_mode_callback)
 
         self.vehicle_attitude = np.array([1.0, 0.0, 0.0, 0.0])
         self.vehicle_local_position = np.array([0.0, 0.0, 0.0])
@@ -111,19 +132,6 @@ class BskMpc(Node):
             }
         }
 
-    def wait_for_clock(self):
-        """Wait for the /clock topic to start publishing."""
-        rate = self.create_rate(10)  # 10 Hz
-        warned = False
-        while rclpy.ok():
-            topics = dict(self.get_topic_names_and_types())
-            if '/clock' in topics:
-                return
-            if not warned:
-                self.get_logger().info("Waiting for /clock topic...")
-                warned = True
-            rate.sleep()
-
     def vector2PoseMsg(self, frame_id, position, attitude):
         pose_msg = PoseStamped()
         pose_msg.header.stamp = self.get_clock().now().to_msg()
@@ -137,28 +145,34 @@ class BskMpc(Node):
         pose_msg.pose.position.z = float(position[2])
         return pose_msg
 
-    def set_publishers_subscribers(self):        
+    def set_publishers_subscribers(self, qos_profile_pub, qos_profile_sub):
         # Subscribers
-        if self.use_hill:
-            self.hill_trans_sub = self.create_subscription(
-                HillRelStateMsgPayload,
-                "bsk/out/hill_trans_state",
-                self.hill_trans_callback,
-                10
-            )
-            self.hill_rot_sub = self.create_subscription(
-                AttGuidMsgPayload,
-                "bsk/out/hill_rot_state",
-                self.hill_rot_callback,
-                10
-            )
-        else:
-            self.sc_state_sub = self.create_subscription(
-                SCStatesMsgPayload, 
-                "bsk/out/sc_states", 
-                self.sc_state_callback, 
-                10
-            )
+        self.status_sub_v1 = self.create_subscription(
+            VehicleStatus,
+            'fmu/out/vehicle_status_v1',
+            self.vehicle_status_callback,
+            qos_profile_sub)
+        self.status_sub = self.create_subscription(
+            VehicleStatus,
+            'fmu/out/vehicle_status',
+            self.vehicle_status_callback,
+            qos_profile_sub)
+        
+        self.attitude_sub = self.create_subscription(
+            VehicleAttitude,
+            'fmu/out/vehicle_attitude',
+            self.vehicle_attitude_callback,
+            qos_profile_sub)
+        self.angular_vel_sub = self.create_subscription(
+            VehicleAngularVelocity,
+            'fmu/out/vehicle_angular_velocity',
+            self.vehicle_angular_velocity_callback,
+            qos_profile_sub)
+        self.local_position_sub = self.create_subscription(
+            VehicleLocalPosition,
+            'fmu/out/vehicle_local_position',
+            self.vehicle_local_position_callback,
+            qos_profile_sub)
         self.setpoint_pose_sub = self.create_subscription(
             PoseStamped,
             'bsk_mpc/setpoint_pose',
@@ -166,26 +180,21 @@ class BskMpc(Node):
             0
         )
         if self.type == 'follower_wrench':
-            if self.use_hill:
-                self.leader_hill_trans_sub = self.create_subscription(
-                    HillRelStateMsgPayload,
-                    f"/{self.name_leader}/bsk/out/hill_trans_state",
-                    self.leader_hill_trans_callback,
-                    10
-                )
-                self.leader_hill_rot_sub = self.create_subscription(
-                    AttGuidMsgPayload,
-                    f"/{self.name_leader}/bsk/out/hill_rot_state",
-                    self.leader_hill_rot_callback,
-                    10
-                )
-            else:
-                self.leader_state_sub = self.create_subscription(
-                    SCStatesMsgPayload,
-                    f"/{self.name_leader}/bsk/out/sc_states",
-                    self.leader_state_callback,
-                    10
-                )
+            self.attitude_sub = self.create_subscription(
+                VehicleAttitude,
+                f'{self.name_leader}/fmu/out/vehicle_attitude',
+                self.leader_attitude_callback,
+                qos_profile_sub)
+            self.angular_vel_sub = self.create_subscription(
+                VehicleAngularVelocity,
+                f'{self.name_leader}/fmu/out/vehicle_angular_velocity',
+                self.leader_angular_velocity_callback,
+                qos_profile_sub)
+            self.local_position_sub = self.create_subscription(
+                VehicleLocalPosition,
+                f'{self.name_leader}/fmu/out/vehicle_local_position',
+                self.leader_local_position_callback,
+                qos_profile_sub)
             self.leader_traj_sub = [
                 self.create_subscription(
                 Path,
@@ -195,6 +204,10 @@ class BskMpc(Node):
             ]
 
         # Publishers
+        self.publisher_offboard_mode = self.create_publisher(
+            OffboardControlMode,
+            'fmu/in/offboard_control_mode',
+            qos_profile_pub)
         self.predicted_path_pub = self.create_publisher(
             Path,
             'bsk_mpc/predicted_path',
@@ -224,68 +237,75 @@ class BskMpc(Node):
             'bsk_mpc/vehicle_angular_velocity_ref',
             10)
         if self.type == 'da':
-            self.publisher_thruster_array_cmd = self.create_publisher(
-                THRArrayCmdForceMsgPayload, 
-                "bsk/in/thr_array_cmd_force", 
-                10
-            )
+            self.publisher_direct_actuator = self.create_publisher(
+                ActuatorMotors,
+                'fmu/in/actuator_motors',
+                qos_profile_pub)
         elif self.type == 'wrench' or self.type == 'follower_wrench':
-            self.publisher_force_cmd = self.create_publisher(
-                CmdForceBodyMsgPayload, 
-                "bsk/in/cmd_force", 
-                10
-            )
-            self.publisher_torque_cmd = self.create_publisher(
-                CmdTorqueBodyMsgPayload,
-                "bsk/in/cmd_torque",
-                10
-            )
+            self.publisher_thrust_setpoint = self.create_publisher(
+                VehicleThrustSetpoint,
+                'fmu/in/vehicle_thrust_setpoint',
+                qos_profile_pub)
+            self.publisher_torque_setpoint = self.create_publisher(
+                VehicleTorqueSetpoint,
+                'fmu/in/vehicle_torque_setpoint',
+                qos_profile_pub)
         else:
             self.get_logger().error(f"Unknown type: {self.type}. Use 'da' or 'wrench'.")
             return
 
-    def sc_state_callback(self, msg: SCStatesMsgPayload):
-        # position and velocity in inertial frame
-        # attitude in body to inertial frame
-        # angular velocity in body frame
-        self.vehicle_local_position = msg.r_bn_n
-        self.vehicle_local_velocity = msg.v_bn_n
-        q_nb = MRP2quat(np.array(msg.sigma_bn), ref_quat=self.setpoint_attitude)
-        self.vehicle_attitude = q_nb
-        self.vehicle_angular_velocity = msg.omega_bn_b
-    
-    def hill_trans_callback(self, msg: HillRelStateMsgPayload):
-        # position and velocity in Hill frame
-        self.vehicle_local_position = msg.r_dc_h
-        self.vehicle_local_velocity = msg.v_dc_h            
+    def vehicle_attitude_callback(self, msg):
+        self.vehicle_attitude_timestamp = Clock().now().nanoseconds / 1e9
+        # NED-> ENU transformation
+        # Receives quaternion in NED frame as (qw, qx, qy, qz)
+        q_enu = 1/np.sqrt(2) * np.array([msg.q[0] + msg.q[3], msg.q[1] + msg.q[2], msg.q[1] - msg.q[2], msg.q[0] - msg.q[3]])
+        q_enu /= np.linalg.norm(q_enu)
+        self.vehicle_attitude = q_enu.astype(float)
 
-    def hill_rot_callback(self, msg: AttGuidMsgPayload):
-        # attitude in body to Hill frame
-        # angular velocity in body frame
-        q_nb = MRP2quat(np.array(msg.sigma_br), ref_quat=self.setpoint_attitude)
-        self.vehicle_attitude = q_nb
-        self.vehicle_angular_velocity = msg.omega_br_b
+    def vehicle_local_position_callback(self, msg):
+        # NED-> ENU transformation
+        self.vehicle_local_position_timestamp = Clock().now().nanoseconds / 1e9
+        self.vehicle_local_position[0] = msg.y
+        self.vehicle_local_position[1] = msg.x
+        self.vehicle_local_position[2] = -msg.z
+        self.vehicle_local_velocity[0] = msg.vy
+        self.vehicle_local_velocity[1] = msg.vx
+        self.vehicle_local_velocity[2] = -msg.vz
 
-    def leader_state_callback(self, msg: SCStatesMsgPayload):
-        # Update leader spacecraft state
-        self.leader["state"]["timestamp"] = msg.stamp.sec * 1_000_000_000 + msg.stamp.nanosec
-        self.leader["state"]["position"] = msg.r_bn_n
-        self.leader["state"]["velocity"] = msg.v_bn_n
-        q_nb = MRP2quat(np.array(msg.sigma_bn), ref_quat=self.vehicle_attitude)
-        self.leader["state"]["attitude"] = q_nb
-        self.leader["state"]["angular_velocity"] = msg.omega_bn_b
+    def vehicle_angular_velocity_callback(self, msg):
+        # NED-> ENU transformation
+        self.vehicle_angular_velocity_timestamp = Clock().now().nanoseconds / 1e9
+        self.vehicle_angular_velocity[0] = msg.xyz[0]
+        self.vehicle_angular_velocity[1] = -msg.xyz[1]
+        self.vehicle_angular_velocity[2] = -msg.xyz[2]
 
-    def leader_hill_trans_callback(self, msg: HillRelStateMsgPayload):
-        # position and velocity in Hill frame
-        self.leader["state"]["position"] = msg.r_dc_h
-        self.leader["state"]["velocity"] = msg.v_dc_h
-    
-    def leader_hill_rot_callback(self, msg: AttGuidMsgPayload):
-        # attitude in body to Hill frame
-        # angular velocity in body frame
-        q_nb = MRP2quat(np.array(msg.sigma_br), ref_quat=self.vehicle_attitude)
-        self.leader["state"]["attitude"] = q_nb
-        self.leader["state"]["angular_velocity"] = msg.omega_br_b
+    def vehicle_status_callback(self, msg):
+        # print("NAV_STATUS: ", msg.nav_state)
+        # print("  - offboard status: ", VehicleStatus.NAVIGATION_STATE_OFFBOARD)
+        self.vehicle_status_timestamp = Clock().now().nanoseconds / 1e9
+        self.nav_state = msg.nav_state
+
+    def leader_attitude_callback(self, msg):
+        # NED-> ENU transformation
+        # Receives quaternion in NED frame as (qw, qx, qy, qz)
+        q_enu = 1/np.sqrt(2) * np.array([msg.q[0] + msg.q[3], msg.q[1] + msg.q[2], msg.q[1] - msg.q[2], msg.q[0] - msg.q[3]])
+        q_enu /= np.linalg.norm(q_enu)
+        self.leader["state"]["attitude"] = q_enu.astype(float)
+
+    def leader_local_position_callback(self, msg):
+        # NED-> ENU transformation
+        self.leader["state"]["position"][0] = msg.y
+        self.leader["state"]["position"][1] = msg.x
+        self.leader["state"]["position"][2] = -msg.z
+        self.leader["state"]["velocity"][0] = msg.vy
+        self.leader["state"]["velocity"][1] = msg.vx
+        self.leader["state"]["velocity"][2] = -msg.vz
+
+    def leader_angular_velocity_callback(self, msg):
+        # NED-> ENU transformation
+        self.leader["state"]["angular_velocity"][0] = msg.xyz[0]
+        self.leader["state"]["angular_velocity"][1] = -msg.xyz[1]
+        self.leader["state"]["angular_velocity"][2] = -msg.xyz[2]
 
     def leader_pred_callback(self, msg: Path, namespace):
         pred = self.leader['trajectory']
@@ -402,33 +422,41 @@ class BskMpc(Node):
         self.vehicle_angular_velocity_pub.publish(angular_velocity_msg)
 
     def publish_thruster_cmd(self, u):
-        Fthr = 1.5
-        u = np.asarray(u).flatten()
+        actuator_outputs_msg = ActuatorMotors()
+        actuator_outputs_msg.timestamp = int(Clock().now().nanoseconds / 1000)
 
-        thr_array_msg = THRArrayCmdForceMsgPayload()
-        thr_array_msg.stamp = self.get_clock().now().to_msg()
+        # Normalize thrust values w.r.t. max thrust
+        thrust = u[0, :]
 
         # Generate actuator outputs dynamically
         thrust_command = []
-        for t in u:
+        for t in thrust:
             thrust_command.extend([max(t, 0.0), max(-t, 0.0)])
         thrust_command = np.clip(np.array(thrust_command, dtype=np.float32), 0.0, 1.0)
 
-        thr_array_msg.thrforce[:len(thrust_command)] = thrust_command * Fthr
-        self.publisher_thruster_array_cmd.publish(thr_array_msg)
+        actuator_outputs_msg.control[:len(thrust_command)] = thrust_command
+        self.publisher_direct_actuator.publish(actuator_outputs_msg)
 
     def publish_wrench_cmd(self, u):
-        force_msg = CmdForceBodyMsgPayload()
-        force_msg.stamp = self.get_clock().now().to_msg()
+        # u is [F, T] in FLU frame
 
-        torque_msg = CmdTorqueBodyMsgPayload()
-        torque_msg.stamp = self.get_clock().now().to_msg()
+        # The PX4 uses normalized wrench input. Scaling with respect to the maximum force and torque.
+        F_scaling = 1/(2 * 1.5)
+        T_scaling = 1/(4 * 0.12 * 1.5)
+        u[0:3] *= F_scaling
+        u[3:6] *= T_scaling
 
-        force_msg.forcerequestbody = u[:3]
-        torque_msg.torquerequestbody = u[3:6]
+        thrust_outputs_msg = VehicleThrustSetpoint()
+        thrust_outputs_msg.timestamp = int(Clock().now().nanoseconds / 1000)
 
-        self.publisher_force_cmd.publish(force_msg)
-        self.publisher_torque_cmd.publish(torque_msg)
+        torque_outputs_msg = VehicleTorqueSetpoint()
+        torque_outputs_msg.timestamp = int(Clock().now().nanoseconds / 1000)
+
+        thrust_outputs_msg.xyz = [u[0], -u[1], -u[2]]
+        torque_outputs_msg.xyz = [u[3], -u[4], -u[5]]
+
+        self.publisher_thrust_setpoint.publish(thrust_outputs_msg)
+        self.publisher_torque_setpoint.publish(torque_outputs_msg)
 
     def publish_predicted_path(self, x_pred):
         now = self.get_clock().now()
@@ -446,9 +474,45 @@ class BskMpc(Node):
 
             predicted_path_msg.poses.append(pose_stamped)
         self.predicted_path_pub.publish(predicted_path_msg)
+    
+    def check_data_validity(self):
+        current_time = Clock().now().nanoseconds / 1e9
+
+        # Check if the data is valid based on the timestamps
+        if (current_time - self.vehicle_attitude_timestamp > DATA_VALIDITY_STREAM or
+            current_time - self.vehicle_local_position_timestamp > DATA_VALIDITY_STREAM or
+            current_time - self.vehicle_angular_velocity_timestamp > DATA_VALIDITY_STREAM):
+            self.get_logger().warn("Vehicle attitude, position, or angular velocity data is too old. Skipping offboard control...")
+            return False
+
+        if (current_time - self.vehicle_status_timestamp > DATA_VALIDITY_STATUS):
+            self.get_logger().warn("Vehicle status data is too old. Skipping offboard control...")
+            return False
+
+        return True
+
+    def offboard_control_mode_callback(self):
+        # Publish offboard control modes
+        offboard_msg = OffboardControlMode()
+        offboard_msg.timestamp = int(Clock().now().nanoseconds / 1000)
+        offboard_msg.position = False
+        offboard_msg.velocity = False
+        offboard_msg.acceleration = False
+        offboard_msg.attitude = False
+        offboard_msg.body_rate = False
+        offboard_msg.direct_actuator = False
+        if self.type == 'da':
+            offboard_msg.direct_actuator = True
+        elif self.type == 'wrench' or self.type == 'follower_wrench':
+            offboard_msg.thrust_and_torque = True
+        self.publisher_offboard_mode.publish(offboard_msg)
 
     def cmdloop_callback(self):
         if not self.received_first_setpoint:
+            return
+        
+        # Check data validity
+        if not self.check_data_validity():
             return
         
         x0 = np.array([self.vehicle_local_position[0],
@@ -547,10 +611,11 @@ class BskMpc(Node):
         else:
             raise ValueError(f'Invalid type: {self.type}')
 
-        if self.type == 'da':
-            self.publish_thruster_cmd(self.control)
-        elif self.type == 'wrench' or self.type == 'follower_wrench':
-            self.publish_wrench_cmd(self.control)
+        if self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
+            if self.type == 'da':
+                self.publish_thruster_cmd(self.control)
+            elif self.type == 'wrench' or self.type == 'follower_wrench':
+                self.publish_wrench_cmd(self.control)
 
         # Publish predicted path
         self.publish_predicted_path(x_pred)

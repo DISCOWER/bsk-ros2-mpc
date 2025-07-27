@@ -40,9 +40,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from nav_msgs.msg import Path, Odometry
-from geometry_msgs.msg import PoseStamped, TwistStamped, Vector3Stamped
-from bsk_msgs.msg import CmdForceBodyMsgPayload, CmdTorqueBodyMsgPayload, SCStatesMsgPayload, THRArrayCmdForceMsgPayload, HillRelStateMsgPayload
-from .tools.path_tools import sample_other_path
+from geometry_msgs.msg import PoseStamped, Vector3Stamped
+from bsk_msgs.msg import CmdForceBodyMsgPayload, CmdTorqueBodyMsgPayload, SCStatesMsgPayload, THRArrayCmdForceMsgPayload, HillRelStateMsgPayload, AttGuidMsgPayload
 from .tools.utils import MRP2quat
 
 class BskMpc(Node):
@@ -69,7 +68,7 @@ class BskMpc(Node):
             self.get_logger().info("Using simulation time, waiting for /clock...")
             self.wait_for_clock()
 
-        timer_period_cmd = 0.1  # seconds
+        timer_period_cmd = 0.2  # seconds
         self.timer_cmd = self.create_timer(timer_period_cmd, self.cmdloop_callback)
 
         # Create Spacecraft and controller objects
@@ -137,17 +136,24 @@ class BskMpc(Node):
 
     def set_publishers_subscribers(self):        
         # Subscribers
-        self.state_sub = self.create_subscription(
-            SCStatesMsgPayload, 
-            "bsk/out/sc_states", 
-            self.state_callback, 
-            10
-        )
         if self.use_hill:
-            self.hill_state_sub = self.create_subscription(
+            self.hill_trans_sub = self.create_subscription(
                 HillRelStateMsgPayload,
-                "bsk/out/hill_rel_state",
-                self.hill_state_callback,
+                "bsk/out/hill_trans_state",
+                self.hill_trans_callback,
+                10
+            )
+            self.hill_rot_sub = self.create_subscription(
+                AttGuidMsgPayload,
+                "bsk/out/hill_rot_state",
+                self.hill_rot_callback,
+                10
+            )
+        else:
+            self.sc_state_sub = self.create_subscription(
+                SCStatesMsgPayload, 
+                "bsk/out/sc_states", 
+                self.sc_state_callback, 
                 10
             )
         self.setpoint_pose_sub = self.create_subscription(
@@ -174,6 +180,18 @@ class BskMpc(Node):
             Vector3Stamped,
             'bsk_mpc/vehicle_angular_velocity',
             10)
+        self.ref_pose_pub = self.create_publisher(
+            PoseStamped,
+            'bsk_mpc/vehicle_pose_ref',
+            10)
+        self.ref_velocity_pub = self.create_publisher(
+            Vector3Stamped,
+            'bsk_mpc/vehicle_velocity_ref',
+            10)
+        self.ref_angular_velocity_pub = self.create_publisher(
+            Vector3Stamped,
+            'bsk_mpc/vehicle_angular_velocity_ref',
+            10)
         if self.type == 'da':
             self.publisher_thruster_array_cmd = self.create_publisher(
                 THRArrayCmdForceMsgPayload, 
@@ -195,22 +213,27 @@ class BskMpc(Node):
             self.get_logger().error(f"Unknown type: {self.type}. Use 'da' or 'wrench'.")
             return
 
-    def state_callback(self, msg: SCStatesMsgPayload):
+    def sc_state_callback(self, msg: SCStatesMsgPayload):
         # position and velocity in inertial frame
         # attitude in body to inertial frame
         # angular velocity in body frame
-        if self.use_hill is False:
-            self.vehicle_local_position = msg.r_bn_n
-            self.vehicle_local_velocity = msg.v_bn_n
-        sigma_bn = np.array(msg.sigma_bn)
-        q_bn = MRP2quat(sigma_bn, ref_quat=self.setpoint_attitude)
-        self.vehicle_attitude = q_bn
+        self.vehicle_local_position = msg.r_bn_n
+        self.vehicle_local_velocity = msg.v_bn_n
+        q_nb = MRP2quat(np.array(msg.sigma_bn), ref_quat=self.setpoint_attitude)
+        self.vehicle_attitude = q_nb
         self.vehicle_angular_velocity = msg.omega_bn_b
     
-    def hill_state_callback(self, msg: HillRelStateMsgPayload):
+    def hill_trans_callback(self, msg: HillRelStateMsgPayload):
         # position and velocity in Hill frame
         self.vehicle_local_position = msg.r_dc_h
         self.vehicle_local_velocity = msg.v_dc_h
+
+    def hill_rot_callback(self, msg: AttGuidMsgPayload):
+        # attitude in body to Hill frame
+        # angular velocity in body frame
+        q_nb = MRP2quat(np.array(msg.sigma_br), ref_quat=self.setpoint_attitude)
+        self.vehicle_attitude = q_nb
+        self.vehicle_angular_velocity = msg.omega_br_b
 
     def others_odom_callback(self, msg: Odometry, namespace):
         odom = self.others[namespace]['odom']
@@ -259,7 +282,6 @@ class BskMpc(Node):
         pose_msg.pose.orientation.y = float(reference_attitude[2])
         pose_msg.pose.orientation.z = float(reference_attitude[3])
         self.ref_pose_pub.publish(pose_msg)
-
         # Publish velocity
         twist_msg = Vector3Stamped()
         twist_msg.header.stamp = pose_msg.header.stamp
@@ -268,7 +290,6 @@ class BskMpc(Node):
         twist_msg.vector.y = float(reference_velocity[1])
         twist_msg.vector.z = float(reference_velocity[2])
         self.ref_velocity_pub.publish(twist_msg)
-
         # Publish angular velocity
         angular_velocity_msg = Vector3Stamped()
         angular_velocity_msg.header.stamp = pose_msg.header.stamp
@@ -291,7 +312,6 @@ class BskMpc(Node):
         pose_msg.pose.orientation.y = float(attitude[2])
         pose_msg.pose.orientation.z = float(attitude[3])
         self.vehicle_pose_pub.publish(pose_msg)
-
         # Publish velocity
         velocity_msg = Vector3Stamped()
         velocity_msg.header.stamp = pose_msg.header.stamp
@@ -300,7 +320,6 @@ class BskMpc(Node):
         velocity_msg.vector.y = float(velocity[1])
         velocity_msg.vector.z = float(velocity[2])
         self.vehicle_velocity_pub.publish(velocity_msg)
-
         # Publish angular velocity
         angular_velocity_msg = Vector3Stamped()
         angular_velocity_msg.header.stamp = pose_msg.header.stamp
@@ -426,15 +445,21 @@ class BskMpc(Node):
         elif self.type == 'wrench':
             self.publish_wrench_cmd(self.control)
 
-    def add_set_pos_callback(self, request, response):
-        self.setpoint_position[0] = request.pose.position.x
-        self.setpoint_position[1] = request.pose.position.y
-        self.setpoint_position[2] = request.pose.position.z
-        self.setpoint_attitude[0] = request.pose.orientation.w
-        self.setpoint_attitude[1] = request.pose.orientation.x
-        self.setpoint_attitude[2] = request.pose.orientation.y
-        self.setpoint_attitude[3] = request.pose.orientation.z
-        return response
+        # Publish current state
+        self.publish_current_state(
+            position=self.vehicle_local_position,
+            velocity=self.vehicle_local_velocity,
+            attitude=self.vehicle_attitude,
+            angular_rate=self.vehicle_angular_velocity
+        )
+        # Publish reference state
+        self.publish_reference(
+            reference_position=self.setpoint_position,
+            reference_velocity=self.setpoint_velocity,
+            reference_attitude=self.setpoint_attitude,
+            reference_angular_rate=self.setpoint_angular_velocity
+        )
+
 
     def get_setpoint_pose_callback(self, msg):
         self.setpoint_position[0] = msg.pose.position.x
@@ -449,6 +474,8 @@ class BskMpc(Node):
         norm = np.linalg.norm(self.setpoint_attitude)
         if norm > 0:
             self.setpoint_attitude /= norm
+        if np.dot(self.vehicle_attitude, self.setpoint_attitude) < 0:
+            self.setpoint_attitude = -self.setpoint_attitude
 
         self.get_logger().info(f"Setpoint position: {self.setpoint_position}, attitude: {self.setpoint_attitude}")
         self.get_logger().info(f"Position: {self.vehicle_local_position}, Attitude: {self.vehicle_attitude}")

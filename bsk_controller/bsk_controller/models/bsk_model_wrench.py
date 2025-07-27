@@ -83,6 +83,7 @@ def bsk_model_wrench():
     u_ref = ca.MX.sym('u_ref', u.size()[0])
     model.p = ca.vertcat(x_ref, u_ref)
     
+    q = q / ca.norm_2(q)
     rotMat = get_rotMat(q)
     w_cross = ca.vertcat(
         ca.horzcat(0, -w[2], w[1]),
@@ -106,8 +107,8 @@ def bsk_model_wrench():
     model.u = u
 
     # limits
-    F_lim = 2 * 1.5 * 2/3
-    T_lim = 4 * 0.12 * 1.5 * 1/3
+    F_lim = 2 * 1.4 * 2/3
+    T_lim = 2 * 0.12 * 1.4 * 1/3
     model.u_min = np.array([-F_lim, -F_lim, -F_lim, -T_lim, -T_lim, -T_lim])
     model.u_max = np.array([F_lim, F_lim, F_lim, T_lim, T_lim, T_lim])
 

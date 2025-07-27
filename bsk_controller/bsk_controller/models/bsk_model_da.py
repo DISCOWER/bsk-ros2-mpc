@@ -102,7 +102,7 @@ def bsk_model_da():
         ca.horzcat(w[2], 0, -w[0]),
         ca.horzcat(-w[1], w[0], 0)
     )
-
+    q = q/ca.norm_2(q)
     pdot = v
     vdot = mass_inv * ca.mtimes(rotMat, ca.mtimes(B_F, u))
     qdot = quat_derivative(q, w)

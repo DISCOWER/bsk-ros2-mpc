@@ -44,16 +44,16 @@ from ..models.bsk_model_wrench import bsk_model_wrench
 class MpcWrench():
     def __init__(self):
         # Define the controller parameters
-        self.dt = 0.1               # MPC time step [s]
+        self.dt = 0.2               # MPC time step [s]
         self.Nx = 30                # Prediction horizon, states             
         self.Q = np.diag([          # State weighting matrix
             1e0, 1e0, 1e0,
             3e1, 3e1, 3e1, 
-            5e3, 
-            5e0, 5e0, 5e0])            
+            1e2, 
+            1e1, 1e1, 1e1])           
         self.R = np.diag([          # State weighting matrix
-            5e-1, 5e-1, 5e-1,
-            5e1, 5e1, 5e1]) 
+            2e-1, 2e-1, 2e-1,
+            2e0, 2e0, 2e0]) 
         self.P = 20 * self.Q        # Terminal state weighting matrix
 
         # Initial state (position, velocity, quaternion, angular velocity)
@@ -169,5 +169,10 @@ class MpcWrench():
         for i in range(self.Nx):
             x_pred[i,:] = self.solver.get(i, "x")
         x_pred[self.Nx,:] = self.solver.get(self.Nx, "x")
+
+        # Convert elements of u_opt less than 3e-2 to zero
+        u_opt[:3][np.abs(u_opt[:3]) < 3e-2] = 0.0
+        u_opt[3:][np.abs(u_opt[3:]) < 4e-3] = 0.0
+        # Alternatively, use indices to avoid view assignment issues:
         
         return u_opt, x_pred

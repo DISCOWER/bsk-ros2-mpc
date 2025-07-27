@@ -44,14 +44,14 @@ from ..models.bsk_model_da import bsk_model_da
 class MpcDa():
     def __init__(self):
         # Define the controller parameters
-        self.dt = 0.1               # MPC time step [s]
+        self.dt = 0.2               # MPC time step [s]
         self.Nx = 30                # Prediction horizon, states             
         self.Q = np.diag([          # State weighting matrix
             1e0, 1e0, 1e0,
             3e1, 3e1, 3e1, 
-            5e3, 
-            5e0, 5e0, 5e0])          
-        self.R = 1e1 * np.eye(6)    # Control weighting matrix
+            1e2, 
+            1e1, 1e1, 1e1])          
+        self.R = 1e-1 * np.eye(6)    # Control weighting matrix
         self.P = 20 * self.Q        # Terminal state weighting matrix
 
         # Initial state (position, velocity, quaternion, angular velocity)
@@ -167,5 +167,8 @@ class MpcDa():
         for i in range(self.Nx):
             x_pred[i,:] = self.solver.get(i, "x")
         x_pred[self.Nx,:] = self.solver.get(self.Nx, "x")
+
+        # Convert elements of u_opt less than 1.5e-2 to zero
+        u_opt[np.abs(u_opt) < 1.5e-2] = 0.0
         
         return u_opt, x_pred

@@ -5,11 +5,11 @@ import math
 
 # Set these variables directly in the script (angles in degrees)
 namespace = "bskSat0"
-x = -5.0
-y = 0.0
+x = 0.0
+y = 3.0
 z = 0.0
 roll_deg = 0.0   # degrees
-pitch_deg = 0.0  # degrees
+pitch_deg = 180.0 # degrees
 yaw_deg = 0.0    # degrees
 
 def euler_to_quaternion(roll, pitch, yaw):

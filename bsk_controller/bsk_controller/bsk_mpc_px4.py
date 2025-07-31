@@ -99,6 +99,9 @@ class BskMpc(Node):
         self.setpoint_attitude = np.array([1.0, 0.0, 0.0, 0.0])
         self.setpoint_angular_velocity = np.array([0.0, 0.0, 0.0])
         self.received_first_setpoint = False
+        self.vehicle_attitude_timestamp = -np.inf
+        self.vehicle_local_position_timestamp = -np.inf
+        self.vehicle_angular_velocity_timestamp = -np.inf
 
         # Create Spacecraft and controller objects
         if self.type == 'da':
@@ -182,17 +185,17 @@ class BskMpc(Node):
         if self.type == 'follower_wrench':
             self.attitude_sub = self.create_subscription(
                 VehicleAttitude,
-                f'{self.name_leader}/fmu/out/vehicle_attitude',
+                f'/{self.name_leader}/fmu/out/vehicle_attitude',
                 self.leader_attitude_callback,
                 qos_profile_sub)
             self.angular_vel_sub = self.create_subscription(
                 VehicleAngularVelocity,
-                f'{self.name_leader}/fmu/out/vehicle_angular_velocity',
+                f'/{self.name_leader}/fmu/out/vehicle_angular_velocity',
                 self.leader_angular_velocity_callback,
                 qos_profile_sub)
             self.local_position_sub = self.create_subscription(
                 VehicleLocalPosition,
-                f'{self.name_leader}/fmu/out/vehicle_local_position',
+                f'/{self.name_leader}/fmu/out/vehicle_local_position',
                 self.leader_local_position_callback,
                 qos_profile_sub)
             self.leader_traj_sub = [
@@ -267,7 +270,7 @@ class BskMpc(Node):
         self.vehicle_local_position_timestamp = Clock().now().nanoseconds / 1e9
         self.vehicle_local_position[0] = msg.y
         self.vehicle_local_position[1] = msg.x
-        self.vehicle_local_position[2] = -msg.z
+        self.vehicle_local_position[2] = -msg.z * 0
         self.vehicle_local_velocity[0] = msg.vy
         self.vehicle_local_velocity[1] = msg.vx
         self.vehicle_local_velocity[2] = -msg.vz
@@ -296,7 +299,7 @@ class BskMpc(Node):
         # NED-> ENU transformation
         self.leader["state"]["position"][0] = msg.y
         self.leader["state"]["position"][1] = msg.x
-        self.leader["state"]["position"][2] = -msg.z
+        self.leader["state"]["position"][2] = -msg.z * 0
         self.leader["state"]["velocity"][0] = msg.vy
         self.leader["state"]["velocity"][1] = msg.vx
         self.leader["state"]["velocity"][2] = -msg.vz
@@ -307,7 +310,7 @@ class BskMpc(Node):
         self.leader["state"]["angular_velocity"][1] = -msg.xyz[1]
         self.leader["state"]["angular_velocity"][2] = -msg.xyz[2]
 
-    def leader_pred_callback(self, msg: Path, namespace):
+    def leader_pred_callback(self, msg: Path):
         pred = self.leader['trajectory']
 
         # Reset stored prediction
@@ -357,8 +360,8 @@ class BskMpc(Node):
         if np.dot(self.vehicle_attitude, self.setpoint_attitude) < 0:
             self.setpoint_attitude = -self.setpoint_attitude
 
-        self.get_logger().info(f"Setpoint position: {self.setpoint_position}, attitude: {self.setpoint_attitude}")
-        self.get_logger().info(f"Position: {self.vehicle_local_position}, Attitude: {self.vehicle_attitude}")
+        # self.get_logger().info(f"Setpoint position: {self.setpoint_position}, attitude: {self.setpoint_attitude}")
+        # self.get_logger().info(f"Position: {self.vehicle_local_position}, Attitude: {self.vehicle_attitude}")
         self.received_first_setpoint = True
 
     def publish_reference(self, reference_position, reference_velocity, reference_attitude, reference_angular_rate):
@@ -478,16 +481,16 @@ class BskMpc(Node):
     def check_data_validity(self):
         current_time = Clock().now().nanoseconds / 1e9
 
-        # Check if the data is valid based on the timestamps
-        if (current_time - self.vehicle_attitude_timestamp > DATA_VALIDITY_STREAM or
-            current_time - self.vehicle_local_position_timestamp > DATA_VALIDITY_STREAM or
-            current_time - self.vehicle_angular_velocity_timestamp > DATA_VALIDITY_STREAM):
-            self.get_logger().warn("Vehicle attitude, position, or angular velocity data is too old. Skipping offboard control...")
-            return False
+        # # Check if the data is valid based on the timestamps
+        # if (current_time - self.vehicle_attitude_timestamp > DATA_VALIDITY_STREAM or
+        #     current_time - self.vehicle_local_position_timestamp > DATA_VALIDITY_STREAM or
+        #     current_time - self.vehicle_angular_velocity_timestamp > DATA_VALIDITY_STREAM):
+        #     self.get_logger().warn("Vehicle attitude, position, or angular velocity data is too old. Skipping offboard control...")
+        #     return False
 
-        if (current_time - self.vehicle_status_timestamp > DATA_VALIDITY_STATUS):
-            self.get_logger().warn("Vehicle status data is too old. Skipping offboard control...")
-            return False
+        # if (current_time - self.vehicle_status_timestamp > DATA_VALIDITY_STATUS):
+        #     self.get_logger().warn("Vehicle status data is too old. Skipping offboard control...")
+        #     return False
 
         return True
 
@@ -601,6 +604,7 @@ class BskMpc(Node):
                 angular_rate=self.vehicle_angular_velocity
             )
             # Publish reference state
+            # self.get_logger().info(f"Leader position: {self.leader['state']['position']}")
             self.publish_reference(
                 reference_position=self.setpoint_position + self.leader["state"]["position"],
                 reference_velocity=self.setpoint_velocity + self.leader["state"]["velocity"],
@@ -611,11 +615,10 @@ class BskMpc(Node):
         else:
             raise ValueError(f'Invalid type: {self.type}')
 
-        if self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
-            if self.type == 'da':
-                self.publish_thruster_cmd(self.control)
-            elif self.type == 'wrench' or self.type == 'follower_wrench':
-                self.publish_wrench_cmd(self.control)
+        if self.type == 'da':
+            self.publish_thruster_cmd(self.control)
+        elif self.type == 'wrench' or self.type == 'follower_wrench':
+            self.publish_wrench_cmd(self.control)
 
         # Publish predicted path
         self.publish_predicted_path(x_pred)

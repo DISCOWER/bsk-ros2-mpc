@@ -1,0 +1,14 @@
+bsk_mpc_px4:
+Follower:
+```bash
+ros2 launch bsk_controller bsk_mpc_px4.launch.py type:=follower_wrench namespace:=crackle name_leader:=snap
+ros2 launch bsk_controller follower_waypoint.launch.py namespace:=crackle
+```
+
+Leader:
+```bash
+ros2 launch bsk_controller bsk_mpc_px4.launch.py type:=wrench namespace:=snap name_leader:=snap
+ros2 launch bsk_controller waypoint_publisher.launch.py namespace:=snap
+```
+
+

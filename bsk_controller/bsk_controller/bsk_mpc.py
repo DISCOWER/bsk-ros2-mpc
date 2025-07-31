@@ -287,7 +287,7 @@ class BskMpc(Node):
         self.leader["state"]["attitude"] = q_nb
         self.leader["state"]["angular_velocity"] = msg.omega_br_b
 
-    def leader_pred_callback(self, msg: Path, namespace):
+    def leader_pred_callback(self, msg: Path):
         pred = self.leader['trajectory']
 
         # Reset stored prediction

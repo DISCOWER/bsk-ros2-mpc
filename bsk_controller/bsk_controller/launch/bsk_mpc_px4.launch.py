@@ -79,4 +79,18 @@ def generate_launch_description():
                 {'name_leader': name_leader}
             ]
         ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='static_tf_world_to_inertial',
+            arguments=['0', '0', '0', '0', '0', '0', 'map', 'inertial']
+        ),
+        Node(
+                package='tf2_ros',
+                executable='static_transform_publisher',
+                name='static_tf_world_to_camera',
+                #[p, q]
+                # arguments=['0', '0', '2.5', '0', '0.4349655', '0', '0.9', 'world', 'camera_link'] # camera 1
+                arguments=['2', '1.9', '2.3', '0.3010647', '0.3013046', '-0.6395013', '0.6400107', 'map', 'camera_link'] # camera 2
+        ),
     ])

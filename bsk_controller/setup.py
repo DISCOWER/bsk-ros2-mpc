@@ -23,6 +23,9 @@ setup(
         'console_scripts': [
             'bsk_mpc = bsk_controller.bsk_mpc:main',
             'bsk_mpc_px4 = bsk_controller.bsk_mpc_px4:main',
+            'follower_waypoint_publisher = bsk_controller.bsk_planner.follower_waypoint_publisher:main',
+            'waypoint_publisher = bsk_controller.bsk_planner.waypoint_publisher:main',
+            'figure8_waypoint_publisher = bsk_controller.bsk_planner.figure8_waypoint_publisher:main',
         ],
     },
 )

@@ -50,5 +50,11 @@ ros2 launch bsk_controller bsk_mpc.launch.py type:=da
 Wrench MPC:
 
 ```bash
-ros2 launch bsk_controller bsk_mpc.launch.py type:=wrench
+ros2 launch bsk_controller bsk_mpc.launch.py type:=wrench namespace:=bskSat0
+```
+
+Follower Wrench MPC:
+
+```bash
+ros2 launch bsk_controller bsk_mpc.launch.py type:=follower_wrench namespace:=bskSat1 name_leader:=bskSat0
 ```

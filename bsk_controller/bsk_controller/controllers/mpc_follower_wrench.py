@@ -49,11 +49,11 @@ class MpcFollowerWrench():
         self.Q = np.diag([          # State weighting matrix
             1e0, 1e0, 1e0,
             3e1, 3e1, 3e1, 
-            1e2, 
-            1e1, 1e1, 1e1])           
+            5e3, 
+            5e1, 5e1, 5e1])           
         self.R = np.diag([          # State weighting matrix
             2e-1, 2e-1, 2e-1,
-            2e0, 2e0, 2e0]) 
+            5e2, 5e2, 5e2]) 
         self.P = 20 * self.Q        # Terminal state weighting matrix
 
         # Initial state (position, velocity, quaternion, angular velocity)
@@ -216,9 +216,8 @@ class MpcFollowerWrench():
             x_pred[i,:] = self.solver.get(i, "x")
         x_pred[self.Nx,:] = self.solver.get(self.Nx, "x")
 
-        # Convert elements of u_opt less than 3e-2 to zero
-        u_opt[:3][np.abs(u_opt[:3]) < 3e-2] = 0.0
-        u_opt[3:][np.abs(u_opt[3:]) < 4e-3] = 0.0
+        # u_opt[:3][np.abs(u_opt[:3]) < 1e-2] = 0.0
+        # u_opt[3:][np.abs(u_opt[3:]) < 1e-3] = 0.0
         # Alternatively, use indices to avoid view assignment issues:
         
         return u_opt, x_pred

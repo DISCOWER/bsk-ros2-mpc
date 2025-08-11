@@ -1,4 +1,5 @@
 import rclpy
+from rclpy.parameter import Parameter
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 import math
@@ -19,7 +20,18 @@ def euler_to_quaternion(roll, pitch, yaw):
 
 class WaypointPublisher(Node):
     def __init__(self):
+        # Declare 'is_sim' as a parameter that can be set via launch
         super().__init__('waypoint_publisher')
+        self.declare_parameter('is_sim', False)
+        is_sim = self.get_parameter('is_sim').get_parameter_value().bool_value
+        self.set_parameters([Parameter('use_sim_time', Parameter.Type.BOOL, is_sim)])
+
+        self.get_logger().info(f"Use sim time = {self.get_parameter('use_sim_time').get_parameter_value().bool_value}")
+
+        # Check if use_sim_time is enabled
+        if self.get_parameter('use_sim_time').get_parameter_value().bool_value:
+            self.get_logger().info("Using simulation time, waiting for /clock...")
+            self.wait_for_clock()
 
         self.period = self.declare_parameter('period', 20.0).value
 
@@ -31,31 +43,43 @@ class WaypointPublisher(Node):
         self.timer = self.create_timer(self.timer_period, self.publish_waypoint)
         
         self.waypoints = [
-            [1.5, 0.0, 0.0],
-            [3.0, 1.0, 0.0],
-            [3.0, -1.0, 0.0]
+            [1.5, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            [3.0, 0.7, 0.0, 1.0, 0.0, 0.0, 0.0],
+            [3.0, 0.7, 0.0, 0.7071068, 0.0, 0.0, 0.7071068],
+            [3.0, -0.7, 0.0, 0.7071068, 0.0, 0.0, 0.7071068],
+            [1.5, 0.0, 0.0, 0.7071068, 0.0, 0.0, 0.7071068],
         ]
+
+    def wait_for_clock(self):
+        """Wait for the /clock topic to start publishing."""
+        rate = self.create_rate(10)  # 10 Hz
+        warned = False
+        while rclpy.ok():
+            topics = dict(self.get_topic_names_and_types())
+            if '/clock' in topics:
+                return
+            if not warned:
+                self.get_logger().info("Waiting for /clock topic...")
+                warned = True
+            rate.sleep()
 
     def publish_waypoint(self):
         now = self.get_clock().now()
         elapsed = (now - self.start_time).nanoseconds * 1e-9  # seconds
-        idx = int(elapsed // self.period) % 3
-        # yaw = (idx % 4) * (math.pi / 2.0)  # 0, 90, 180, 270 deg
-        yaw = 0.0
+        idx = int(elapsed // self.period) % len(self.waypoints)
 
-        pos = self.waypoints[idx]
+        waypoint = self.waypoints[idx]
         msg = PoseStamped()
         msg.header.frame_id = "map"
         msg.header.stamp = now.to_msg()
-        msg.pose.position.x = pos[0]
-        msg.pose.position.y = pos[1]
-        msg.pose.position.z = pos[2]
+        msg.pose.position.x = waypoint[0]
+        msg.pose.position.y = waypoint[1]
+        msg.pose.position.z = waypoint[2]
 
-        quat = euler_to_quaternion(0.0, 0.0, yaw)
-        msg.pose.orientation.x = quat['x']
-        msg.pose.orientation.y = quat['y']
-        msg.pose.orientation.z = quat['z']
-        msg.pose.orientation.w = quat['w']
+        msg.pose.orientation.w = waypoint[3]
+        msg.pose.orientation.x = waypoint[4]
+        msg.pose.orientation.y = waypoint[5]
+        msg.pose.orientation.z = waypoint[6]
 
         self.publisher.publish(msg)
 

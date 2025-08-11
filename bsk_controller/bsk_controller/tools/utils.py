@@ -36,9 +36,9 @@ def MRP2quat(sigma, ref_quat=None):
     """
     sigma = np.asarray(sigma)
     s2 = np.dot(sigma, sigma)
-    if s2 > 1:
-        sigma = -sigma / s2
-        s2 = np.dot(sigma, sigma)
+    # if s2 > 1:
+    #     sigma = -sigma / s2
+    #     s2 = np.dot(sigma, sigma)
     denom = 1 + s2
     qw = (1 - s2) / denom
     qx = 2 * sigma[0] / denom

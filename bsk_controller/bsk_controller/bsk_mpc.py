@@ -77,7 +77,6 @@ class BskMpc(Node):
         self.setpoint_velocity = np.array([0.0, 0.0, 0.0])
         self.setpoint_attitude = np.array([1.0, 0.0, 0.0, 0.0])
         self.setpoint_angular_velocity = np.array([0.0, 0.0, 0.0])
-        self.received_first_setpoint = False
 
         # Create Spacecraft and controller objects
         if self.type == 'da':
@@ -325,21 +324,23 @@ class BskMpc(Node):
         self.setpoint_position[0] = msg.pose.position.x
         self.setpoint_position[1] = msg.pose.position.y
         self.setpoint_position[2] = msg.pose.position.z
-        self.setpoint_attitude[0] = msg.pose.orientation.w
-        self.setpoint_attitude[1] = msg.pose.orientation.x
-        self.setpoint_attitude[2] = msg.pose.orientation.y
-        self.setpoint_attitude[3] = msg.pose.orientation.z
-
-        # normalize setpoint attitude
-        norm = np.linalg.norm(self.setpoint_attitude)
+        
+        # Extract and normalize quaternion
+        new_attitude = np.array([
+            msg.pose.orientation.w,
+            msg.pose.orientation.x,
+            msg.pose.orientation.y,
+            msg.pose.orientation.z
+        ])
+        
+        # Normalize setpoint attitude
+        norm = np.linalg.norm(new_attitude)
         if norm > 0:
-            self.setpoint_attitude /= norm
-        if np.dot(self.vehicle_attitude, self.setpoint_attitude) < 0:
-            self.setpoint_attitude = -self.setpoint_attitude
-
-        self.get_logger().info(f"Setpoint position: {self.setpoint_position}, attitude: {self.setpoint_attitude}")
-        self.get_logger().info(f"Position: {self.vehicle_local_position}, Attitude: {self.vehicle_attitude}")
-        self.received_first_setpoint = True
+            new_attitude /= norm
+        if np.dot(self.vehicle_attitude, new_attitude) < 0:
+            self.setpoint_attitude = -new_attitude
+        else:
+            self.setpoint_attitude = new_attitude
 
     def publish_reference(self, reference_position, reference_velocity, reference_attitude, reference_angular_rate):
         # Publish pose (position + attitude)
@@ -424,6 +425,10 @@ class BskMpc(Node):
         torque_msg = CmdTorqueBodyMsgPayload()
         torque_msg.stamp = self.get_clock().now().to_msg()
 
+        # Convert elements of u less than 3e-2 to zero
+        u[:3][np.abs(u[:3]) < 3e-2] = 0.0
+        u[3:][np.abs(u[3:]) < 5e-3] = 0.0
+
         force_msg.forcerequestbody = u[:3]
         torque_msg.torquerequestbody = u[3:6]
 
@@ -447,10 +452,7 @@ class BskMpc(Node):
             predicted_path_msg.poses.append(pose_stamped)
         self.predicted_path_pub.publish(predicted_path_msg)
 
-    def cmdloop_callback(self):
-        if not self.received_first_setpoint:
-            return
-        
+    def cmdloop_callback(self):        
         x0 = np.array([self.vehicle_local_position[0],
                 self.vehicle_local_position[1],
                 self.vehicle_local_position[2],
@@ -493,10 +495,14 @@ class BskMpc(Node):
                                    
         elif self.type == 'follower_wrench':
             if self.leader["trajectory"]["timestamps"] == []:
-                x_ref = np.concatenate((self.leader["state"]["position"] + self.setpoint_position,          # position
-                                    np.zeros(3),                                                          # velocity
-                                    self.setpoint_attitude,                                               # attitude
-                                    np.zeros(3)), axis=0)                                                 # angular velocity   
+                reference_position = self.leader["state"]["position"] + self.setpoint_position
+                reference_velocity = self.leader["state"]["velocity"] + self.setpoint_velocity
+                reference_attitude = self.leader["state"]["attitude"]
+                reference_angular_rate = np.zeros(3)
+                x_ref = np.concatenate((reference_position,            # position
+                                    reference_velocity,                # velocity
+                                    reference_attitude,                # attitude
+                                    reference_angular_rate), axis=0)   # angular velocity
                 # Use current odometry of other spacecraft
                 x_others = [
                     sample_other_path(
@@ -511,11 +517,15 @@ class BskMpc(Node):
                 self.get_logger().warn("Leader trajectory is empty, using current leader state as reference.")
             else:
                 # Use leader's predicted trajectory
+                reference_position = self.leader["trajectory"]["position"][0] + self.setpoint_position
+                reference_velocity = self.leader["trajectory"]["velocity"][0] + self.setpoint_velocity
+                reference_attitude = self.leader["trajectory"]["attitude"][0]
+                reference_angular_rate = self.leader["trajectory"]["angular_velocity"][0]
                 for i in range(len(self.leader["trajectory"]["timestamps"])):
                     x_ref = np.concatenate((self.leader["trajectory"]["position"][i] + self.setpoint_position,  # position
                                         self.leader["trajectory"]["velocity"][i],                               # velocity
-                                        self.setpoint_attitude,          # attitude
-                                        np.zeros(3)), axis=0)            # angular velocity
+                                        self.leader["trajectory"]["attitude"][i],                               # attitude
+                                        self.leader["trajectory"]["angular_velocity"][i]), axis=0)              # angular velocity
                 # Use predicted paths of other spacecraft
                 x_others = [
                     sample_other_path(
@@ -538,10 +548,10 @@ class BskMpc(Node):
             )
             # Publish reference state
             self.publish_reference(
-                reference_position=self.setpoint_position + self.leader["state"]["position"],
-                reference_velocity=self.setpoint_velocity + self.leader["state"]["velocity"],
-                reference_attitude=self.setpoint_attitude,
-                reference_angular_rate=self.setpoint_angular_velocity
+                reference_position=reference_position,
+                reference_velocity=reference_velocity,
+                reference_attitude=reference_attitude,
+                reference_angular_rate=reference_angular_rate
             )
 
         else:

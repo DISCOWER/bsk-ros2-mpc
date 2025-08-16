@@ -20,6 +20,11 @@ def generate_launch_description():
         default_value='wrench',
         description='Type of the controller (da, wrench, ...)'
     )
+    name_others_arg = DeclareLaunchArgument(
+        'name_others',
+        default_value='crackle pop',
+        description='Names of other spacecraft, separated by space'
+    )
     period_arg = DeclareLaunchArgument(
         'period',
         default_value='20.0',
@@ -28,29 +33,32 @@ def generate_launch_description():
 
     namespace = LaunchConfiguration('namespace')
     type = LaunchConfiguration('type')
+    name_others = LaunchConfiguration('name_others')
     period = LaunchConfiguration('period')
 
     return LaunchDescription([
         namespace_arg,
         type_arg,
+        name_others_arg,
         period_arg,
 
         # Launch MPC
         Node(
             package='bsk-ros2-mpc',
             namespace=namespace,
-            executable='bsk_mpc_px4',
+            executable='bsk-mpc-px4',
             name='bsk_mpc',
             output='screen',
             emulate_tty=True,
             parameters=[
-                {'type': type}
+                {'type': type},
+                {'name_others': name_others}
             ]
         ),
         Node(
             package='bsk-ros2-mpc',
             namespace=namespace,
-            executable='waypoint_publisher',
+            executable='waypoint-publisher',
             name='waypoint_publisher',
             output='screen',
             emulate_tty=True,
@@ -59,16 +67,16 @@ def generate_launch_description():
                 {'is_simulation': False}
             ],
         ),
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='static_tf_world_to_inertial',
-            arguments=['0', '0', '0', '0', '0', '0', 'map', 'inertial']
-        ),
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='static_tf_world_to_camera',
-            arguments=['2', '1.9', '2.3', '0.3010647', '0.3013046', '-0.6395013', '0.6400107', 'map', 'camera_link'] # camera 2
-        ),
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='static_tf_world_to_inertial',
+        #     arguments=['0', '0', '0', '0', '0', '0', 'map', 'inertial']
+        # ),
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='static_tf_world_to_camera',
+        #     arguments=['2', '1.9', '2.3', '0.3010647', '0.3013046', '-0.6395013', '0.6400107', 'map', 'camera_link'] # camera 2
+        # ),
     ])

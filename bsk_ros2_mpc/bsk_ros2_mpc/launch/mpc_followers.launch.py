@@ -23,7 +23,7 @@ def generate_launch_description():
         Node(
             package='bsk-ros2-mpc',
             namespace='followerSc_1',
-            executable='bsk_mpc',
+            executable='bsk-mpc',
             name='bsk_mpc',
             output='screen',
             emulate_tty=True,
@@ -36,7 +36,7 @@ def generate_launch_description():
         Node(
             package='bsk-ros2-mpc',
             namespace='followerSc_2',
-            executable='bsk_mpc',
+            executable='bsk-mpc',
             name='bsk_mpc',
             output='screen',
             emulate_tty=True,
@@ -49,8 +49,8 @@ def generate_launch_description():
         Node(
             package='bsk-ros2-mpc',
             namespace='followerSc_1',
-            executable='follower_waypoint_publisher',
-            name='follower_waypoint_publisher',
+            executable='follower-publisher',
+            name='follower_publisher',
             output='screen',
             emulate_tty=True,
             parameters=[
@@ -61,8 +61,8 @@ def generate_launch_description():
         Node(
             package='bsk-ros2-mpc',
             namespace='followerSc_2',
-            executable='follower_waypoint_publisher',
-            name='follower_waypoint_publisher',
+            executable='follower-publisher',
+            name='follower_publisher',
             output='screen',
             emulate_tty=True,
             parameters=[

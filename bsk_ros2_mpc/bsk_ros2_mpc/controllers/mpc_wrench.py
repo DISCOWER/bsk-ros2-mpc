@@ -10,7 +10,7 @@ from acados_template import AcadosOcp, AcadosOcpSolver
 from ..models.bsk_model_wrench import bsk_model_wrench
 
 class MpcWrench():
-    def __init__(self):
+    def __init__(self, n_others=0):
         # Define the controller parameters
         self.dt = 0.2               # MPC time step [s]
         self.Nx = 30                # Prediction horizon, states             
@@ -24,8 +24,15 @@ class MpcWrench():
             1e2, 1e2, 1e2]) 
         self.P = 20 * self.Q        # Terminal state weighting matrix
 
+        # Number of other agents
+        self.n_others = n_others
+
         # Initial state (position, velocity, quaternion, angular velocity)
         self.x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+        self.W_slack = np.array([1e5]*self.n_others)
+        self.idx_slack = np.arange(len(self.W_slack))
+        self.idxsh = np.arange(self.n_others)
 
         # Create the OCP
         self.solver = self.setup()
@@ -43,7 +50,7 @@ class MpcWrench():
         ocp.code_export_directory = codegen_dir
 
         # Define the model
-        model = bsk_model_wrench()
+        model = bsk_model_wrench(n_others=self.n_others)
         ocp.model = model
 
         # Set dimensions
@@ -51,11 +58,17 @@ class MpcWrench():
         nu = model.u.size()[0]
         self.nx = nx
         self.nu = nu
-        ocp.parameter_values = np.zeros(nx+nu)
+        ocp.parameter_values = np.zeros(nx+nu+self.n_others*3)
 
         # Get variables
         x_ref = model.p[:nx]
         u_ref = model.p[nx:nx+nu]
+
+        # Set slack variables costs
+        ocp.cost.Zl = self.W_slack
+        ocp.cost.Zu = self.W_slack
+        ocp.cost.zl = np.zeros(self.idx_slack.size)
+        ocp.cost.zu = np.zeros(self.idx_slack.size)
 
         # Define the cost function
         ocp.cost.cost_type = 'NONLINEAR_LS'
@@ -86,8 +99,25 @@ class MpcWrench():
         # Set constraints on U
         ocp.constraints.lbu = model.u_min
         ocp.constraints.ubu = model.u_max
-        ocp.constraints.idxbu = np.arange(nu)      
+        ocp.constraints.idxbu = np.arange(nu)     
 
+        # Set up the constraints for collision avoidance
+        ocp.constraints.lh = np.full(self.n_others, -1e9)   # lower bounds on con_h_expr
+        ocp.constraints.uh = np.zeros(self.n_others)  # no upper bounds (one-sided constraint)  
+        ocp.constraints.idxsh = self.idxsh  # index of slack variables corresponding to con_h_expr
+        ocp.constraints.lh_e = np.full(self.n_others, -1e9)   # lower bounds on con_h_expr
+        ocp.constraints.uh_e = np.zeros(self.n_others)  # no upper bounds (one-sided constraint)  
+        ocp.constraints.idxsh_e = self.idxsh  # index of slack variables corresponding to con_h_expr
+
+        # Set slack variables
+        ocp.cost.Zl = self.W_slack
+        ocp.cost.Zu = self.W_slack
+        ocp.cost.zl = np.zeros(self.idx_slack.size)
+        ocp.cost.zu = np.zeros(self.idx_slack.size)
+        ocp.cost.Zl_e = self.W_slack
+        ocp.cost.Zu_e = self.W_slack
+        ocp.cost.zl_e = np.zeros(self.idx_slack.size)
+        ocp.cost.zu_e = np.zeros(self.idx_slack.size)
         # Set initial state
         ocp.constraints.x0 = self.x0
 
@@ -105,22 +135,37 @@ class MpcWrench():
         ocp_solver = AcadosOcpSolver(ocp, json_file=json_path)
         return ocp_solver
 
-    def get_input(self, x0, x_ref):
+    def get_input(self, x0, x_ref, x_others=[]):
         # Properly set x0, i.e. constrain it to x0
         self.solver.set(0, "lbx", x0.flatten())
         self.solver.set(0, "ubx", x0.flatten())
+
+        n_others = len(x_others)
+        if n_others > self.n_others:
+            raise ValueError(f"Number of other agents {n_others} exceeds the maximum number {self.n_others}.")
 
         # Update reference
         if x_ref.ndim == 1:
             x_ref = x_ref.reshape(-1, 1)
         len_x_ref = x_ref.shape[1]
-        for k in range(self.Nx + 1):
+        for k in range(self.Nx + 1):            
+            # reference state
             if k < len_x_ref:
-                x_ref_k = x_ref[:,k]
+                p_k = x_ref[:,k]
             else:
-                x_ref_k = x_ref[:,-1]
+                p_k = x_ref[:,-1]
             u_ref_k = np.zeros(self.nu)
-            self.solver.set(k, "p", np.concatenate((x_ref_k, u_ref_k), axis=0))
+            p_k = np.concatenate((p_k, u_ref_k), axis=0)         
+
+            # position other agents
+            for i in range(n_others):
+                p_k = np.concatenate((p_k, x_others[i][k]), axis=0)
+            for i in range(self.n_others - n_others):
+                # Handle missing agents by adding a large position
+                pos_other = x0[:3].flatten() + np.array([1e2]*3)
+                p_k = np.concatenate((p_k, pos_other), axis=0)
+
+            self.solver.set(k, "p", p_k)
 
         status = self.solver.solve()
         u_opt = self.solver.get(0, 'u')

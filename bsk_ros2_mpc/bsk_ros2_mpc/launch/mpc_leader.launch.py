@@ -45,7 +45,7 @@ def generate_launch_description():
         Node(
             package='bsk-ros2-mpc',
             namespace=namespace,
-            executable='bsk_mpc',
+            executable='bsk-mpc',
             name='bsk_mpc',
             output='screen',
             emulate_tty=True,
@@ -57,7 +57,7 @@ def generate_launch_description():
         Node(
             package='bsk-ros2-mpc',
             namespace=namespace,
-            executable='waypoint_publisher',
+            executable='waypoint-publisher',
             name='waypoint_publisher',
             output='screen',
             emulate_tty=True,

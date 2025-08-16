@@ -1,47 +1,14 @@
-############################################################################
-#
-#   Copyright (C) 2024 PX4 Development Team. All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-#
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in
-#    the documentation and/or other materials provided with the
-#    distribution.
-# 3. Neither the name PX4 nor the names of its contributors may be
-#    used to endorse or promote products derived from this software
-#    without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
-# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
-# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.
-#
-############################################################################
-
+#!/usr/bin/env python
 __author__ = "Elias Krantz"
 __contact__ = "eliaskra@kth.se"
-
 import numpy as np
 import os
 from scipy.linalg import block_diag
 import casadi as ca
 from acados_template import AcadosOcp, AcadosOcpSolver
-from ..models.bsk_model_wrench import bsk_model_wrench
+from ..models.bsk_model_da import bsk_model_da
 
-class MpcWrench():
+class MpcDa():
     def __init__(self):
         # Define the controller parameters
         self.dt = 0.2               # MPC time step [s]
@@ -49,11 +16,9 @@ class MpcWrench():
         self.Q = np.diag([          # State weighting matrix
             1e0, 1e0, 1e0,
             3e1, 3e1, 3e1, 
-            1e3, 
-            1e1, 1e1, 1e1])           
-        self.R = np.diag([          # State weighting matrix
-            2e-1, 2e-1, 2e-1,
-            1e2, 1e2, 1e2]) 
+            1e2, 
+            1e1, 1e1, 1e1])          
+        self.R = 1e-1 * np.eye(6)    # Control weighting matrix
         self.P = 20 * self.Q        # Terminal state weighting matrix
 
         # Initial state (position, velocity, quaternion, angular velocity)
@@ -75,7 +40,7 @@ class MpcWrench():
         ocp.code_export_directory = codegen_dir
 
         # Define the model
-        model = bsk_model_wrench()
+        model = bsk_model_da()
         ocp.model = model
 
         # Set dimensions
@@ -163,16 +128,14 @@ class MpcWrench():
             if status != 0:
                 print("Solver failed again. Using previous solution.")
                 u_opt =  self.solver.get(1, 'u')
-        
+
         # get solution
         x_pred = np.ndarray((self.Nx+1, self.nx))
         for i in range(self.Nx):
             x_pred[i,:] = self.solver.get(i, "x")
         x_pred[self.Nx,:] = self.solver.get(self.Nx, "x")
 
-        # Convert elements of u_opt less than 3e-2 to zero
-        # u_opt[:3][np.abs(u_opt[:3]) < 3e-2] = 0.0
-        # u_opt[3:][np.abs(u_opt[3:]) < 5e-3] = 0.0
-        # Alternatively, use indices to avoid view assignment issues:
+        # Convert elements of u_opt less than 1.5e-2 to zero
+        u_opt[np.abs(u_opt) < 1.5e-2] = 0.0
         
         return u_opt, x_pred

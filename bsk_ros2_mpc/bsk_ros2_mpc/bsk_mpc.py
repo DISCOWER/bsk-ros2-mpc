@@ -5,31 +5,25 @@ __contact__ = "eliaskra@kth.se"
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.parameter import Parameter
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped, Vector3Stamped
 from bsk_msgs.msg import CmdForceBodyMsgPayload, CmdTorqueBodyMsgPayload, SCStatesMsgPayload, THRArrayCmdForceMsgPayload, HillRelStateMsgPayload, AttGuidMsgPayload
 from .tools.utils import MRP2quat, sample_other_path
 
+from mpc_msgs.srv import SetPose
+
 class BskMpc(Node):
     def __init__(self):
-        super().__init__('bsk_mpc',
-                        parameter_overrides=[Parameter('use_sim_time', Parameter.Type.BOOL, True)])
+        super().__init__('bsk_mpc')
         
-        # Get type
-        self.type = self.declare_parameter('type', 'da').value
-
-        # Get use_hill (true/false)
-        self.use_hill = self.declare_parameter('use_hill', False).value
-
-        # Get name of leader spacecraft
-        self.name_leader = self.declare_parameter('name_leader', '').value
+        # Setup parameters
+        self._setup_parameters()
 
         # Setup publishers and subscribers
         self.set_publishers_subscribers()
 
         # Check if use_sim_time is enabled
-        if self.get_parameter('use_sim_time').get_parameter_value().bool_value:
+        if self.use_sim_time:
             self.get_logger().info("Using simulation time, waiting for /clock...")
             self.wait_for_clock()
 
@@ -76,6 +70,23 @@ class BskMpc(Node):
                 "angular_velocity": [],
             }
         }
+    
+    def _setup_parameters(self):
+        """Configure ROS parameters for port settings."""
+        self.declare_parameter('type', 'da')
+        self.declare_parameter('use_hill', True)
+        self.declare_parameter('name_leader', '')
+        self.declare_parameter('use_rviz', False)
+
+        # use_sim_time is automatically declared by ROS2, just get its value
+        self.use_sim_time = self.get_parameter('use_sim_time').get_parameter_value().bool_value
+        self.get_logger().info(f"Use sim time: {self.use_sim_time}")
+        self.type = self.get_parameter('type').get_parameter_value().string_value
+        self.use_hill = self.get_parameter('use_hill').get_parameter_value().bool_value
+        self.get_logger().info(f"Use Hill frame: {self.use_hill}")
+        self.name_leader = self.get_parameter('name_leader').get_parameter_value().string_value
+        self.use_rviz = self.get_parameter('use_rviz').get_parameter_value().bool_value
+        self.get_logger().info(f"Using RViz: {self.use_rviz}")
 
     def wait_for_clock(self):
         """Wait for the /clock topic to start publishing."""
@@ -103,54 +114,69 @@ class BskMpc(Node):
         pose_msg.pose.position.z = float(position[2])
         return pose_msg
 
-    def set_publishers_subscribers(self):        
+    def set_publishers_subscribers(self):
+        # QoS profile
+        qos_profile = rclpy.qos.QoSProfile(
+            reliability=rclpy.qos.ReliabilityPolicy.BEST_EFFORT,
+            durability=rclpy.qos.DurabilityPolicy.VOLATILE,
+            history=rclpy.qos.HistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+
         # Subscribers
         if self.use_hill:
             self.hill_trans_sub = self.create_subscription(
                 HillRelStateMsgPayload,
                 "bsk/out/hill_trans_state",
                 self.hill_trans_callback,
-                10
+                qos_profile
             )
             self.hill_rot_sub = self.create_subscription(
                 AttGuidMsgPayload,
                 "bsk/out/hill_rot_state",
                 self.hill_rot_callback,
-                10
+                qos_profile
             )
         else:
             self.sc_state_sub = self.create_subscription(
                 SCStatesMsgPayload, 
                 "bsk/out/sc_states", 
                 self.sc_state_callback, 
-                10
+                qos_profile
             )
-        self.setpoint_pose_sub = self.create_subscription(
-            PoseStamped,
-            'bsk_mpc/setpoint_pose',
-            self.setpoint_pose_callback,
-            0
-        )
+        if self.use_rviz:
+            self.set_pose_srv = self.create_service(
+                SetPose,
+                'set_pose',
+                self.add_setpoint_pose_callback
+            )
+        else:
+            self.setpoint_pose_sub = self.create_subscription(
+                PoseStamped,
+                'bsk_mpc/setpoint_pose',
+                self.setpoint_pose_callback,
+                0
+            )
         if self.type == 'follower_wrench':
             if self.use_hill:
                 self.leader_hill_trans_sub = self.create_subscription(
                     HillRelStateMsgPayload,
                     f"/{self.name_leader}/bsk/out/hill_trans_state",
                     self.leader_hill_trans_callback,
-                    10
+                    qos_profile
                 )
                 self.leader_hill_rot_sub = self.create_subscription(
                     AttGuidMsgPayload,
                     f"/{self.name_leader}/bsk/out/hill_rot_state",
                     self.leader_hill_rot_callback,
-                    10
+                    qos_profile
                 )
             else:
                 self.leader_state_sub = self.create_subscription(
                     SCStatesMsgPayload,
                     f"/{self.name_leader}/bsk/out/sc_states",
                     self.leader_state_callback,
-                    10
+                    qos_profile
                 )
             self.leader_traj_sub = [
                 self.create_subscription(
@@ -193,18 +219,18 @@ class BskMpc(Node):
             self.publisher_thruster_array_cmd = self.create_publisher(
                 THRArrayCmdForceMsgPayload, 
                 "bsk/in/thr_array_cmd_force", 
-                10
+                qos_profile
             )
         elif self.type == 'wrench' or self.type == 'follower_wrench':
             self.publisher_force_cmd = self.create_publisher(
                 CmdForceBodyMsgPayload, 
                 "bsk/in/cmd_force", 
-                10
+                qos_profile
             )
             self.publisher_torque_cmd = self.create_publisher(
                 CmdTorqueBodyMsgPayload,
                 "bsk/in/cmd_torque",
-                10
+                qos_profile
             )
         else:
             self.get_logger().error(f"Unknown type: {self.type}. Use 'da' or 'wrench'.")
@@ -286,6 +312,27 @@ class BskMpc(Node):
             pred['velocity'].append(vel)
             pred['attitude'].append(att)
             pred['angular_velocity'].append(ang_vel)
+    
+    def add_setpoint_pose_callback(self, request, response):
+        self.setpoint_position[0] = request.pose.position.x
+        self.setpoint_position[1] = request.pose.position.y
+        self.setpoint_position[2] = request.pose.position.z
+
+        # Extract and normalize quaternion
+        new_attitude = np.array([
+            request.pose.orientation.w,
+            request.pose.orientation.x,
+            request.pose.orientation.y,
+            request.pose.orientation.z
+        ])
+        norm = np.linalg.norm(new_attitude)
+        if norm > 0:
+            new_attitude /= norm
+        if np.dot(self.vehicle_attitude, new_attitude) < 0:
+            self.setpoint_attitude = -new_attitude
+        else:
+            self.setpoint_attitude = new_attitude
+        return response
 
     def setpoint_pose_callback(self, msg):
         self.setpoint_position[0] = msg.pose.position.x

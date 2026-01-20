@@ -8,6 +8,7 @@ from scipy.linalg import block_diag
 import casadi as ca
 from acados_template import AcadosOcp, AcadosOcpSolver
 from ..models.bsk_model_wrench import bsk_model_wrench
+from ..tools.utils import quat_mult_ca
 
 class MpcWrench():
     def __init__(self, n_others=0):
@@ -16,12 +17,12 @@ class MpcWrench():
         self.Nx = 30                # Prediction horizon, states             
         self.Q = np.diag([          # State weighting matrix
             1e0, 1e0, 1e0,
-            3e1, 3e1, 3e1, 
-            1e3, 
+            1e1, 1e1, 1e1, 
+            1e2, 5e1, 5e1, 5e1, 
             1e1, 1e1, 1e1])           
         self.R = np.diag([          # State weighting matrix
-            2e-1, 2e-1, 2e-1,
-            1e2, 1e2, 1e2]) 
+            1e-1, 1e-1, 1e-1,
+            1e1, 1e1, 1e1]) 
         self.P = 20 * self.Q        # Terminal state weighting matrix
 
         # Number of other agents
@@ -30,7 +31,16 @@ class MpcWrench():
         # Initial state (position, velocity, quaternion, angular velocity)
         self.x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
+        # State constraints
+        self.v_max = 0.5    # Max velocity [m/s]
+        self.w_max = 1.0    # Max angular velocity [rad/s]
+        self.idxbx = np.array([3, 4, 5, 10, 11, 12])  # velocity and angular velocity indices
+        self.n_state_constraints = len(self.idxbx)
+
+        # Slack variable weights for collision avoidance
         self.W_slack = np.array([1e5]*self.n_others)
+        # Slack variable weights for state constraints
+        self.W_slack_state = np.array([1e6]*self.n_state_constraints)
         self.idx_slack = np.arange(len(self.W_slack))
         self.idxsh = np.arange(self.n_others)
 
@@ -64,12 +74,6 @@ class MpcWrench():
         x_ref = model.p[:nx]
         u_ref = model.p[nx:nx+nu]
 
-        # Set slack variables costs
-        ocp.cost.Zl = self.W_slack
-        ocp.cost.Zu = self.W_slack
-        ocp.cost.zl = np.zeros(self.idx_slack.size)
-        ocp.cost.zu = np.zeros(self.idx_slack.size)
-
         # Define the cost function
         ocp.cost.cost_type = 'NONLINEAR_LS'
         ocp.cost.cost_type_e = 'NONLINEAR_LS'
@@ -78,11 +82,16 @@ class MpcWrench():
         ocp.cost.W = block_diag(self.Q, self.R)
         ocp.cost.W_e = block_diag(self.P)
 
-        quat_error = 1 - (model.x[6:10].T @ x_ref[6:10])**2
+        q_ref = x_ref[6:10]
+        q = model.x[6:10]
+        q = q / ca.norm_2(q)
+        q_error = quat_mult_ca(q, ca.vertcat(q_ref[0], -q_ref[1], -q_ref[2], -q_ref[3]))
+        q_error = q_error * ca.sign(q_error[0])
+
         ocp.model.cost_y_expr = ca.vertcat(
             model.x[0:3] - x_ref[0:3],   # Position error
             model.x[3:6] - x_ref[3:6],   # Velocity error
-            quat_error,
+            q_error,
             model.x[10:13] - x_ref[10:13],  # Angular velocity error
             model.u - u_ref, # Control error
         )
@@ -90,16 +99,34 @@ class MpcWrench():
         ocp.model.cost_y_expr_e = ca.vertcat(
             model.x[0:3] - x_ref[0:3],
             model.x[3:6] - x_ref[3:6],
-            quat_error,
+            q_error,
             model.x[10:13] - x_ref[10:13],
         )
-        ocp.cost.yref = np.zeros(ocp.model.cost_y_expr.shape[0])  # Reference for full cost function
-        ocp.cost.yref_e = np.zeros(ocp.model.cost_y_expr_e.shape[0])  # Terminal reference
+        ocp.cost.yref = np.zeros(ocp.model.cost_y_expr.shape[0])
+        ocp.cost.yref[6] = 1.0
+        ocp.cost.yref_e = np.zeros(ocp.model.cost_y_expr_e.shape[0])
+        ocp.cost.yref_e[6] = 1.0
 
         # Set constraints on U
         ocp.constraints.lbu = model.u_min
         ocp.constraints.ubu = model.u_max
-        ocp.constraints.idxbu = np.arange(nu)     
+        ocp.constraints.idxbu = np.arange(nu)
+
+        # Set constraints on X (velocity and angular velocity bounds)
+        ocp.constraints.lbx = np.array([-self.v_max, -self.v_max, -self.v_max, 
+                                         -self.w_max, -self.w_max, -self.w_max])
+        ocp.constraints.ubx = np.array([+self.v_max, +self.v_max, +self.v_max, 
+                                         +self.w_max, +self.w_max, +self.w_max])
+        ocp.constraints.idxbx = self.idxbx
+
+        # Terminal state constraints
+        ocp.constraints.lbx_e = ocp.constraints.lbx
+        ocp.constraints.ubx_e = ocp.constraints.ubx
+        ocp.constraints.idxbx_e = self.idxbx
+
+        # Soft constraints on state bounds (to avoid infeasibility)
+        ocp.constraints.idxsbx = np.arange(self.n_state_constraints)
+        ocp.constraints.idxsbx_e = np.arange(self.n_state_constraints)
 
         # Set up the constraints for collision avoidance
         ocp.constraints.lh = np.full(self.n_others, -1e9)   # lower bounds on con_h_expr
@@ -109,15 +136,23 @@ class MpcWrench():
         ocp.constraints.uh_e = np.zeros(self.n_others)  # no upper bounds (one-sided constraint)  
         ocp.constraints.idxsh_e = self.idxsh  # index of slack variables corresponding to con_h_expr
 
-        # Set slack variables
-        ocp.cost.Zl = self.W_slack
-        ocp.cost.Zu = self.W_slack
-        ocp.cost.zl = np.zeros(self.idx_slack.size)
-        ocp.cost.zu = np.zeros(self.idx_slack.size)
-        ocp.cost.Zl_e = self.W_slack
-        ocp.cost.Zu_e = self.W_slack
-        ocp.cost.zl_e = np.zeros(self.idx_slack.size)
-        ocp.cost.zu_e = np.zeros(self.idx_slack.size)
+        # Set slack variables for collision avoidance (nonlinear constraints)
+        # and state constraints (box constraints on x)
+        # Combine slack weights: first for state constraints (sbx), then for nonlinear (sh)
+        n_slack_total = self.n_state_constraints + self.n_others
+        W_slack_combined = np.concatenate([self.W_slack_state, self.W_slack])
+        zl_combined = np.zeros(n_slack_total)
+        zu_combined = np.zeros(n_slack_total)
+
+        ocp.cost.Zl = W_slack_combined
+        ocp.cost.Zu = W_slack_combined
+        ocp.cost.zl = zl_combined
+        ocp.cost.zu = zu_combined
+        ocp.cost.Zl_e = W_slack_combined
+        ocp.cost.Zu_e = W_slack_combined
+        ocp.cost.zl_e = zl_combined
+        ocp.cost.zu_e = zu_combined
+
         # Set initial state
         ocp.constraints.x0 = self.x0
 
@@ -129,7 +164,11 @@ class MpcWrench():
         ocp.solver_options.nlp_solver_type = "SQP_RTI"
         ocp.solver_options.nlp_solver_max_iter = 1
         ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
+        ocp.solver_options.qp_solver_cond_N = self.Nx
         ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
+        ocp.solver_options.integrator_type = 'ERK'
+        ocp.solver_options.sim_method_num_stages = 4
+        ocp.solver_options.sim_method_num_steps = 3
         ocp.solver_options.print_level = 0
 
         ocp_solver = AcadosOcpSolver(ocp, json_file=json_path)
@@ -182,10 +221,5 @@ class MpcWrench():
         for i in range(self.Nx):
             x_pred[i,:] = self.solver.get(i, "x")
         x_pred[self.Nx,:] = self.solver.get(self.Nx, "x")
-
-        # Convert elements of u_opt less than 3e-2 to zero
-        # u_opt[:3][np.abs(u_opt[:3]) < 3e-2] = 0.0
-        # u_opt[3:][np.abs(u_opt[3:]) < 5e-3] = 0.0
-        # Alternatively, use indices to avoid view assignment issues:
         
         return u_opt, x_pred

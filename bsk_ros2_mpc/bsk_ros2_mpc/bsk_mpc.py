@@ -9,7 +9,6 @@ from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped, Vector3Stamped
 from bsk_msgs.msg import CmdForceBodyMsgPayload, CmdTorqueBodyMsgPayload, SCStatesMsgPayload, THRArrayCmdForceMsgPayload, HillRelStateMsgPayload, AttGuidMsgPayload
 from .tools.utils import MRP2quat, sample_other_path
-
 from mpc_msgs.srv import SetPose
 
 class BskMpc(Node):
@@ -427,7 +426,7 @@ class BskMpc(Node):
         thrust_command = []
         for t in u:
             thrust_command.extend([max(t, 0.0), max(-t, 0.0)])
-        thrust_command = np.clip(np.array(thrust_command, dtype=np.float32), 0.0, 1.0)
+        thrust_command = np.clip(np.array(thrust_command, dtype=np.float32), 0.0, Fthr)
 
         thr_array_msg.thrforce[:len(thrust_command)] = thrust_command * Fthr
         self.publisher_thruster_array_cmd.publish(thr_array_msg)

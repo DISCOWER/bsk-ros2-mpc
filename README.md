@@ -1,6 +1,6 @@
-# BSK ROS2 MPC Controller (BSK-ROS2-MPC)
+# Basilisk-ROS2 MPC Controller (BSK-ROS2-MPC)
 
-This package integrates a Model Predictive Controller (MPC) with [Basilisk astrodynamics simulator](https://hanspeterschaub.info/basilisk/) using [BSK-ROS2-Bridge](https://github.com/Thomas-Chan-2019/srl-ros2-BSK-bridge.git).
+This package integrates a Model Predictive Controller (MPC) with [Basilisk astrodynamics framework](https://hanspeterschaub.info/basilisk/) using [BSK-ROS2-Bridge](https://github.com/DISCOWER/bsk-ros2-bridge).
 
 The MPC is implemented using the [acados framework](https://github.com/acados/acados).
 

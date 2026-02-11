@@ -31,7 +31,7 @@ def bsk_model_da():
 
     # parameters
     F_thr = 1.5
-    rd_thruster = 0.12
+    rd_thruster = 0.17
     mass = 17.8
     mass_inv = 1/mass
     inertia = np.diag([0.315]*3)
@@ -54,10 +54,10 @@ def bsk_model_da():
 
     # dynamics
     B_F = F_thr * ca.vertcat(
-            ca.horzcat(1., 1., 0., 0., 0., 0.),
-            ca.horzcat(0., 0., 1., 1., 0., 0.),
-            ca.horzcat(0., 0., 0., 0., 1., 1.)
-            )
+        ca.horzcat(1., 1., 0., 0., 0., 0.),
+        ca.horzcat(0., 0., 1., 1., 0., 0.),
+        ca.horzcat(0., 0., 0., 0., 1., 1.)
+        )
     B_T = F_thr * rd_thruster * ca.vertcat(
         ca.horzcat(0., 0., 0., 0., 1., -1.),
         ca.horzcat(1., -1., 0., 0., 0., 0.),

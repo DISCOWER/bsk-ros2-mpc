@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+
+# Copyright (c) 2011, Willow Garage, Inc.
+# All rights reserved.
+#
+# Software License Agreement (BSD License 2.0)
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in the
+#       documentation and/or other materials provided with the distribution.
+#     * Neither the name of the Willow Garage, Inc. nor the names of its
+#       contributors may be used to endorse or promote products derived from
+#       this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+from math import sin
+import sys
+
+from geometry_msgs.msg import Point
+from geometry_msgs.msg import TransformStamped
+from interactive_markers import InteractiveMarkerServer
+from geometry_msgs.msg import Pose
+from interactive_markers import MenuHandler
+import rclpy
+from rosidl_runtime_py import set_message_fields
+from tf2_ros.transform_broadcaster import TransformBroadcaster
+from visualization_msgs.msg import InteractiveMarker
+from visualization_msgs.msg import InteractiveMarkerControl
+from visualization_msgs.msg import InteractiveMarkerFeedback
+from visualization_msgs.msg import Marker
+from rclpy.node import Node
+
+from mpc_msgs.srv import SetPose
+
+def makeBox(msg):
+    marker = Marker()
+
+    marker.type = Marker.SPHERE
+    marker.scale.x = msg.scale * 0.4
+    marker.scale.y = msg.scale * 0.4
+    marker.scale.z = msg.scale * 0.4
+    marker.color.r = 1.0
+    marker.color.g = 1.0
+    marker.color.b = 0.0
+    marker.color.a = 1.0
+
+    return marker
+
+
+def makeBoxControl(msg):
+    control = InteractiveMarkerControl()
+    control.always_visible = True
+    control.markers.append(makeBox(msg))
+    msg.controls.append(control)
+    return control
+
+
+def normalizeQuaternion(quaternion_msg):
+    norm = quaternion_msg.x**2 + quaternion_msg.y**2 + quaternion_msg.z**2 + quaternion_msg.w**2
+    s = norm**(-0.5)
+    quaternion_msg.x *= s
+    quaternion_msg.y *= s
+    quaternion_msg.z *= s
+    quaternion_msg.w *= s
+
+
+def make6DofMarker(server, menu_handler, process_feedback, fixed, interaction_mode, position, show_6dof=False):
+    int_marker = InteractiveMarker()
+    int_marker.header.frame_id = 'map'
+    int_marker.pose.position = position
+    int_marker.scale = 0.3
+
+    int_marker.name = 'simple_6dof'
+
+    # insert a box
+    makeBoxControl(int_marker)
+    int_marker.controls[0].interaction_mode = InteractiveMarkerControl.MENU
+
+    if fixed:
+        int_marker.name += '_fixed'
+
+    if interaction_mode != InteractiveMarkerControl.NONE:
+        control_modes_dict = {
+            InteractiveMarkerControl.MOVE_3D: 'MOVE_3D',
+            InteractiveMarkerControl.ROTATE_3D: 'ROTATE_3D',
+            InteractiveMarkerControl.MOVE_ROTATE_3D: 'MOVE_ROTATE_3D'
+        }
+        int_marker.name += '_' + control_modes_dict[interaction_mode]
+
+    if show_6dof:
+        for axis, name in [(1.0, 'move_x'), (2.0, 'move_y'), (3.0, 'move_z')]:
+            control = InteractiveMarkerControl()
+            control.orientation.w = 1.0
+            control.orientation.x = float(axis == 1.0)
+            control.orientation.y = float(axis == 2.0)
+            control.orientation.z = float(axis == 3.0)
+            normalizeQuaternion(control.orientation)
+            control.name = name
+            control.interaction_mode = InteractiveMarkerControl.MOVE_AXIS
+            if fixed:
+                control.orientation_mode = InteractiveMarkerControl.FIXED
+            int_marker.controls.append(control)
+
+        # Rotation controls
+        for axis, name in [(1.0, 'rotate_x'), (2.0, 'rotate_y'), (3.0, 'rotate_z')]:
+            control = InteractiveMarkerControl()
+            control.orientation.w = 1.0
+            control.orientation.x = float(axis == 1.0)
+            control.orientation.y = float(axis == 2.0)
+            control.orientation.z = float(axis == 3.0)
+            normalizeQuaternion(control.orientation)
+            control.name = name
+            control.interaction_mode = InteractiveMarkerControl.ROTATE_AXIS
+            if fixed:
+                control.orientation_mode = InteractiveMarkerControl.FIXED
+            int_marker.controls.append(control)
+
+    server.insert(int_marker, feedback_callback=process_feedback)
+    menu_handler.apply(server, int_marker.name)
+
+class ProcessFeedback():
+    def __init__(self, node):
+        self.marker_pose = Pose()
+        self.node = node
+        
+        # Create service client using the existing node (preserves namespace)
+        self.cli = self.node.create_client(SetPose, 'set_pose')
+        
+        # Removed transform broadcaster and timer - they were demo code causing sequence conflicts
+        # self.br = TransformBroadcaster(self.node)
+        # self.counter = 0
+        # timer = self.node.create_timer(1.0, self.frameCallback)
+        
+        self.menu_handler = MenuHandler()
+
+        self.server = InteractiveMarkerServer(node, 'rviz_target_pose_marker')
+
+        self.menu_handler.insert('Command Pose', callback=self.processFeedback)
+        sub_menu_handle = self.menu_handler.insert('Reset')
+        # self.menu_handler.insert('Reset Position', parent=sub_menu_handle, callback=process_feedback.processFeedback)
+        # self.menu_handler.insert('Reset Orientation', parent=sub_menu_handle, callback=process_feedback.processFeedback)
+
+        position = Point(x=1.0, y=1.0, z=0.0)
+        make6DofMarker(self.server, self.menu_handler, self.processFeedback, True, InteractiveMarkerControl.NONE, position, True)
+        self.server.applyChanges()
+
+
+    def processFeedback(self, feedback):
+        log_prefix = (
+            f"Feedback from marker '{feedback.marker_name}' / control '{feedback.control_name}'"
+        )
+
+        log_mouse = ''
+        if feedback.mouse_point_valid:
+            log_mouse = (
+                f'{feedback.mouse_point.x}, {feedback.mouse_point.y}, '
+                f'{feedback.mouse_point.z} in frame {feedback.header.frame_id}'
+            )
+
+        if feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK:
+            self.node.get_logger().info(f'{log_prefix}: button click at {log_mouse}')
+        elif feedback.event_type == InteractiveMarkerFeedback.MENU_SELECT:
+            if feedback.menu_entry_id == 1:
+                # Check if service is available
+                if not self.cli.wait_for_service(timeout_sec=1.0):
+                    self.node.get_logger().warn('set_pose service not available')
+                    return
+                
+                # Create and send request
+                req = SetPose.Request()
+                req.pose.position.x = self.marker_pose.position.x
+                req.pose.position.y = self.marker_pose.position.y
+                req.pose.position.z = self.marker_pose.position.z
+                req.pose.orientation.w = self.marker_pose.orientation.w
+                req.pose.orientation.x = self.marker_pose.orientation.x
+                req.pose.orientation.y = self.marker_pose.orientation.y
+                req.pose.orientation.z = self.marker_pose.orientation.z
+                
+                future = self.cli.call_async(req)
+                self.node.get_logger().info(f'Commanded pose: {self.marker_pose.position}')
+
+        elif feedback.event_type == InteractiveMarkerFeedback.POSE_UPDATE:
+            # Store the updated pose during drag operations
+            self.marker_pose = feedback.pose
+
+        elif feedback.event_type == InteractiveMarkerFeedback.MOUSE_DOWN:
+            self.node.get_logger().debug(f'{log_prefix}: mouse down at {log_mouse}')
+            
+        elif feedback.event_type == InteractiveMarkerFeedback.MOUSE_UP:
+            self.node.get_logger().debug(f'{log_prefix}: mouse up at {log_mouse}')
+
+    def alignMarker(self, feedback):
+        pose = feedback.pose
+
+        pose.position.x = round(pose.position.x - 0.5) + 0.5
+        pose.position.y = round(pose.position.y - 0.5) + 0.5
+
+        self.node.get_logger().info(
+            f'{feedback.marker_name}: aligning position = {feedback.pose.position.x}, '
+            f'{feedback.pose.position.y}, {feedback.pose.position.z} to '
+            f'{pose.position.x}, {pose.position.y}, {pose.position.z}'
+        )
+
+        self.server.setPose(feedback.marker_name, pose)
+        self.server.applyChanges()
+
+def main(args=None):
+    rclpy.init(args=sys.argv)
+    node = rclpy.create_node('rviz_target_pose_marker')
+
+    process_feedback = ProcessFeedback(node)
+
+    rclpy.spin(node)
+    # server.shutdown()
+
+if __name__ == '__main__':
+    main()

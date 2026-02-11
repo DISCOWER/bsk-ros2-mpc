@@ -1,4 +1,5 @@
 import numpy as np
+import casadi as ca
 
 def get_rotMat(q):
     rotMat = np.array([
@@ -15,6 +16,14 @@ def quat_mult(q1, q2):
         q1[0]*q2[2] - q1[1]*q2[3] + q1[2]*q2[0] + q1[3]*q2[1],
         q1[0]*q2[3] + q1[1]*q2[2] - q1[2]*q2[1] + q1[3]*q2[0]
     ])
+
+def quat_mult_ca(q1, q2):
+    return ca.vertcat(
+        q1[0]*q2[0] - q1[1]*q2[1] - q1[2]*q2[2] - q1[3]*q2[3],
+        q1[0]*q2[1] + q1[1]*q2[0] + q1[2]*q2[3] - q1[3]*q2[2],
+        q1[0]*q2[2] - q1[1]*q2[3] + q1[2]*q2[0] + q1[3]*q2[1],
+        q1[0]*q2[3] + q1[1]*q2[2] - q1[2]*q2[1] + q1[3]*q2[0]
+    )
 
 def quat_derivative(q, w):
     return 0.5 * quat_mult(np.array([0, *w]), q)

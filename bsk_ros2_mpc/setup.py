@@ -8,11 +8,12 @@ package_dir = 'bsk_ros2_mpc'
 setup(
     name=package_name,
     version='0.1.0',
-    packages=find_packages(include=[package_dir, 'bsk_ros2_mpc.*']),
+    packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages', [f'resource/{package_name}']),
         (f'share/{package_name}', ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob(package_dir +'/launch/*.launch.py')),
+        (os.path.join('share', package_name, 'config'), glob(os.path.join(package_dir, 'config', '*.rviz'))),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -29,6 +30,8 @@ setup(
             'bsk-mpc-px4 = bsk_ros2_mpc.bsk_mpc_px4:main',
             'follower-publisher = bsk_ros2_mpc.bsk_planner.follower_publisher:main',
             'waypoint-publisher = bsk_ros2_mpc.bsk_planner.waypoint_publisher:main',
+            'rviz_pose_marker = bsk_ros2_mpc.rviz_pose_marker:main',
+            'visualizer = bsk_ros2_mpc.visualizer:main',
         ],
     },
 )

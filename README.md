@@ -1,6 +1,6 @@
-# BSK ROS2 MPC Controller (BSK-ROS2-MPC)
+# Basilisk-ROS2 MPC Controller (BSK-ROS2-MPC)
 
-This package integrates a Model Predictive Controller (MPC) with [Basilisk astrodynamics simulator](https://hanspeterschaub.info/basilisk/) using [BSK-ROS2-Bridge](https://github.com/Thomas-Chan-2019/srl-ros2-BSK-bridge.git).
+This package integrates a Model Predictive Controller (MPC) with [Basilisk astrodynamics framework](https://hanspeterschaub.info/basilisk/) using [BSK-ROS2-Bridge](https://github.com/DISCOWER/bsk-ros2-bridge).
 
 The MPC is implemented using the [acados framework](https://github.com/acados/acados).
 
@@ -40,7 +40,13 @@ Before launching the MPC controllers, ensure the following components are runnin
 For individual spacecraft control with position and attitude tracking:
 
 ```bash
-ros2 launch bsk-ros2-mpc bsk_mpc.launch.py
+ros2 launch bsk-ros2-mpc mpc.launch.py
+```
+
+To enable RViz visualization and interactive control:
+
+```bash
+ros2 launch bsk-ros2-mpc mpc.launch.py use_rviz:=True
 ```
 
 ### Leader-Follower Formation Control
@@ -64,9 +70,13 @@ The follower launch file starts MPC controllers for both follower spacecraft sim
 
 The launch files support various configuration options:
 
-#### `bsk_mpc.launch.py`
+#### `mpc.launch.py`
 * `type`: Controller type (`da` for direct allocation, `wrench` for force/torque control)
 * `namespace`: ROS namespace for the spacecraft
+* `use_rviz`: Launch RViz visualizer for interactive control and visualization (default: `False`)
+* `use_hill`: Use Hill frame for MPC (default: `True`)
+* `name_leader`: Namespace of the leader spacecraft (for follower mode)
+* `use_sim_time`: Use simulation time from `/clock` topic (default: `False`)
 
 #### `mpc_leader.launch.py`
 * Configures the leader spacecraft to follow waypoint trajectories
@@ -80,17 +90,27 @@ The launch files support various configuration options:
 
 **Single Agent - Basic:**
 ```bash
-ros2 launch bsk-ros2-mpc bsk_mpc.launch.py
+ros2 launch bsk-ros2-mpc mpc.launch.py
 ```
 
 **Single Agent - Direct Allocation MPC:**
 ```bash
-ros2 launch bsk-ros2-mpc bsk_mpc.launch.py type:=da
+ros2 launch bsk-ros2-mpc mpc.launch.py type:=da
 ```
 
 **Single Agent - Wrench MPC:**
 ```bash
-ros2 launch bsk-ros2-mpc bsk_mpc.launch.py type:=wrench namespace:=bskSat0
+ros2 launch bsk-ros2-mpc mpc.launch.py type:=wrench namespace:=bskSat0
+```
+
+**Single Agent - With RViz Control:**
+```bash
+ros2 launch bsk-ros2-mpc mpc.launch.py use_rviz:=True
+```
+
+**Single Agent - Full Configuration:**
+```bash
+ros2 launch bsk-ros2-mpc mpc.launch.py type:=da namespace:=bskSat0 use_rviz:=True use_hill:=True
 ```
 
 **Formation Control - Leader:**

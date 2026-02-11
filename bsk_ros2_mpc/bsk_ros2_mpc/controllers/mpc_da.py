@@ -7,6 +7,7 @@ from scipy.linalg import block_diag
 import casadi as ca
 from acados_template import AcadosOcp, AcadosOcpSolver
 from ..models.bsk_model_da import bsk_model_da
+from ..tools.utils import quat_mult_ca
 
 class MpcDa():
     def __init__(self):
@@ -15,14 +16,24 @@ class MpcDa():
         self.Nx = 30                # Prediction horizon, states             
         self.Q = np.diag([          # State weighting matrix
             1e0, 1e0, 1e0,
-            3e1, 3e1, 3e1, 
-            1e2, 
-            1e1, 1e1, 1e1])          
-        self.R = 1e-1 * np.eye(6)    # Control weighting matrix
+            1e1, 1e1, 1e1, 
+            1e2, 5e1, 5e1, 5e1, 
+            1e1, 1e1, 1e1])           
+        self.R = 5e-1 * np.eye(6)    # Control weighting matrix
         self.P = 20 * self.Q        # Terminal state weighting matrix
 
         # Initial state (position, velocity, quaternion, angular velocity)
         self.x0 = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+        # State constraints
+        self.v_max = 0.5    # Max velocity [m/s]
+        self.w_max = 1.0    # Max angular velocity [rad/s]
+        self.idxbx = np.array([3, 4, 5, 10, 11, 12])  # velocity and angular velocity indices
+        self.n_state_constraints = len(self.idxbx)
+
+        # Slack variable weights for state constraints
+        self.W_slack_state = np.array([1e6]*self.n_state_constraints)
+        self.idx_slack = np.arange(len(self.W_slack_state))
 
         # Create the OCP
         self.solver = self.setup()
@@ -62,11 +73,16 @@ class MpcDa():
         ocp.cost.W = block_diag(self.Q, self.R)
         ocp.cost.W_e = block_diag(self.P)
 
-        quat_error = 1 - (model.x[6:10].T @ x_ref[6:10])**2
+        q_ref = x_ref[6:10]
+        q = model.x[6:10]
+        q = q / ca.norm_2(q)
+        q_error = quat_mult_ca(q, ca.vertcat(q_ref[0], -q_ref[1], -q_ref[2], -q_ref[3]))
+        q_error = q_error * ca.sign(q_error[0])
+
         ocp.model.cost_y_expr = ca.vertcat(
             model.x[0:3] - x_ref[0:3],   # Position error
             model.x[3:6] - x_ref[3:6],   # Velocity error
-            quat_error,
+            q_error,
             model.x[10:13] - x_ref[10:13],  # Angular velocity error
             model.u - u_ref, # Control error
         )
@@ -74,16 +90,44 @@ class MpcDa():
         ocp.model.cost_y_expr_e = ca.vertcat(
             model.x[0:3] - x_ref[0:3],
             model.x[3:6] - x_ref[3:6],
-            quat_error,
+            q_error,
             model.x[10:13] - x_ref[10:13],
         )
-        ocp.cost.yref = np.zeros(ocp.model.cost_y_expr.shape[0])  # Reference for full cost function
-        ocp.cost.yref_e = np.zeros(ocp.model.cost_y_expr_e.shape[0])  # Terminal reference
+        ocp.cost.yref = np.zeros(ocp.model.cost_y_expr.shape[0])
+        ocp.cost.yref[6] = 1.0
+        ocp.cost.yref_e = np.zeros(ocp.model.cost_y_expr_e.shape[0])
+        ocp.cost.yref_e[6] = 1.0
 
         # Set constraints on U
         ocp.constraints.lbu = model.u_min
         ocp.constraints.ubu = model.u_max
-        ocp.constraints.idxbu = np.arange(nu)      
+        ocp.constraints.idxbu = np.arange(nu)  
+
+        # Set constraints on X (velocity and angular velocity bounds)
+        ocp.constraints.lbx = np.array([-self.v_max, -self.v_max, -self.v_max, 
+                                         -self.w_max, -self.w_max, -self.w_max])
+        ocp.constraints.ubx = np.array([+self.v_max, +self.v_max, +self.v_max, 
+                                         +self.w_max, +self.w_max, +self.w_max])
+        ocp.constraints.idxbx = self.idxbx
+
+        # Terminal state constraints
+        ocp.constraints.lbx_e = ocp.constraints.lbx
+        ocp.constraints.ubx_e = ocp.constraints.ubx
+        ocp.constraints.idxbx_e = self.idxbx
+
+        # Soft constraints on state bounds (to avoid infeasibility)
+        ocp.constraints.idxsbx = np.arange(self.n_state_constraints)
+        ocp.constraints.idxsbx_e = np.arange(self.n_state_constraints)
+
+        # Set slack variables for state constraints (box constraints on x)
+        ocp.cost.Zl = self.W_slack_state
+        ocp.cost.Zu = self.W_slack_state
+        ocp.cost.zl = np.zeros(self.n_state_constraints)
+        ocp.cost.zu = np.zeros(self.n_state_constraints)
+        ocp.cost.Zl_e = self.W_slack_state
+        ocp.cost.Zu_e = self.W_slack_state
+        ocp.cost.zl_e = np.zeros(self.n_state_constraints)
+        ocp.cost.zu_e = np.zeros(self.n_state_constraints)
 
         # Set initial state
         ocp.constraints.x0 = self.x0
@@ -96,7 +140,11 @@ class MpcDa():
         ocp.solver_options.nlp_solver_type = "SQP_RTI"
         ocp.solver_options.nlp_solver_max_iter = 1
         ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
+        ocp.solver_options.qp_solver_cond_N = self.Nx
         ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
+        ocp.solver_options.integrator_type = 'ERK'
+        ocp.solver_options.sim_method_num_stages = 4
+        ocp.solver_options.sim_method_num_steps = 3
         ocp.solver_options.print_level = 0
 
         ocp_solver = AcadosOcpSolver(ocp, json_file=json_path)
@@ -134,8 +182,5 @@ class MpcDa():
         for i in range(self.Nx):
             x_pred[i,:] = self.solver.get(i, "x")
         x_pred[self.Nx,:] = self.solver.get(self.Nx, "x")
-
-        # Convert elements of u_opt less than 1.5e-2 to zero
-        u_opt[np.abs(u_opt) < 1.5e-2] = 0.0
         
         return u_opt, x_pred

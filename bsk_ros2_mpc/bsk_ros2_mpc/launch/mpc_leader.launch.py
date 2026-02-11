@@ -9,6 +9,11 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 def generate_launch_description():
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time',
+        default_value='False',
+        description='Use simulation time from /clock topic'
+    )
     namespace_arg = DeclareLaunchArgument(
         'namespace',
         default_value='leaderSc',
@@ -30,40 +35,46 @@ def generate_launch_description():
         description='Period (seconds) to stay at each waypoint'
     )
 
+    use_sim_time = LaunchConfiguration('use_sim_time')
     namespace = LaunchConfiguration('namespace')
     type = LaunchConfiguration('type')
     use_hill = LaunchConfiguration('use_hill')
     period = LaunchConfiguration('period')
 
-    return LaunchDescription([
-        namespace_arg,
-        type_arg,
-        use_hill_arg,
-        period_arg,
+    ld = LaunchDescription()
+    ld.add_action(use_sim_time_arg)
+    ld.add_action(namespace_arg)
+    ld.add_action(type_arg)
+    ld.add_action(use_hill_arg)
+    ld.add_action(period_arg)
 
-        # Launch MPC
-        Node(
-            package='bsk-ros2-mpc',
-            namespace=namespace,
-            executable='bsk-mpc',
-            name='bsk_mpc',
-            output='screen',
-            emulate_tty=True,
-            parameters=[
-                {'type': type},
-                {'use_hill': use_hill}
-            ]
-        ),
-        Node(
-            package='bsk-ros2-mpc',
-            namespace=namespace,
-            executable='waypoint-publisher',
-            name='waypoint_publisher',
-            output='screen',
-            emulate_tty=True,
-            parameters=[
-                {'period': period},
-                {'is_sim': True}
-            ],
-        ),
-    ])
+    # Launch MPC
+    ld.add_action(Node(
+        package='bsk-ros2-mpc',
+        namespace=namespace,
+        executable='bsk-mpc',
+        name='bsk_mpc',
+        output='screen',
+        emulate_tty=True,
+        parameters=[
+            {'use_sim_time': use_sim_time},
+            {'type': type},
+            {'use_hill': use_hill}
+        ]
+    ))
+
+    # Launch waypoint publisher
+    ld.add_action(Node(
+        package='bsk-ros2-mpc',
+        namespace=namespace,
+        executable='waypoint-publisher',
+        name='waypoint_publisher',
+        output='screen',
+        emulate_tty=True,
+        parameters=[
+            {'period': period},
+            {'is_sim': True}
+        ],
+    ))
+
+    return ld

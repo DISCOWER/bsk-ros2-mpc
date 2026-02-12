@@ -1,139 +1,63 @@
-# Basilisk-ROS2 MPC Controller (BSK-ROS2-MPC)
+# Basilisk-ROS 2 MPC
 
-This package integrates a Model Predictive Controller (MPC) with [Basilisk astrodynamics framework](https://hanspeterschaub.info/basilisk/) using [BSK-ROS2-Bridge](https://github.com/DISCOWER/bsk-ros2-bridge).
+A Model Predictive Controller (MPC) for spacecraft position and attitude tracking with the [Basilisk astrodynamics framework](https://hanspeterschaub.info/basilisk/) via the [Basilisk-ROS 2 Bridge](https://github.com/DISCOWER/bsk-ros2-bridge), built on the [acados](https://github.com/acados/acados) optimization framework.
 
-The MPC is implemented using the [acados framework](https://github.com/acados/acados).
-
-## Overview
-
-This package provides MPC controllers for spacecraft control in two main configurations:
-
-1. **Single Agent MPC**: Individual spacecraft control with position and attitude tracking
-2. **Leader-Follower MPC**: Multi-agent formation control where followers maintain relative positions to a leader spacecraft
+The controller receives spacecraft states from a running Basilisk simulation over the bridge and publishes optimal thrust commands back in real time. It supports both direct thruster allocation and wrench-level (force/torque) control, and can optionally be operated interactively through RViz.
 
 ## Setup
 
-This package depends on `acados`. Follow the official [installation guide](https://docs.acados.org/installation/) to set it up.
+### Prerequisites
 
-Clone this repo and the following dependencies into your ROS 2 workspace:
+- [Basilisk-ROS 2 Bridge](https://github.com/DISCOWER/bsk-ros2-bridge) (installed and sourced)
+- [Basilisk-ROS 2 Messages](https://github.com/DISCOWER/bsk-msgs)
+- [Acados](https://docs.acados.org/installation/)
 
-* [bsk-msgs](https://github.com/E-Krantz/bsk-msgs.git)
-
-Build the workspace:
+### Install
 
 ```bash
-colcon build --packages-up-to bsk-ros2-mpc
-source install/local_setup.bash
+cd your_ros2_workspace/src
+git clone https://github.com/DISCOWER/bsk-ros2-mpc.git
+cd ..
+colcon build --packages-select bsk-ros2-mpc
+source install/setup.bash
 ```
 
-## Prerequisites
+## Usage
 
-Before launching the MPC controllers, ensure the following components are running:
+Before launching any MPC controller, ensure the **Basilisk simulation** and the **Basilisk-ROS 2 Bridge** are both running (see [bridge Quick Start](https://github.com/DISCOWER/bsk-ros2-bridge#quick-start)).
 
-1. **Basilisk Simulation**: The astrodynamics simulation must be started first
-2. **BSK-ROS2-Bridge**: The bridge connecting Basilisk to ROS2 must be active
-
-## Running the MPC Controllers
-
-### Single Agent MPC
-
-For individual spacecraft control with position and attitude tracking:
+### Single Agent
 
 ```bash
 ros2 launch bsk-ros2-mpc mpc.launch.py
 ```
 
-To enable RViz visualization and interactive control:
+To use RViz visualization and interactive control:
 
 ```bash
 ros2 launch bsk-ros2-mpc mpc.launch.py use_rviz:=True
 ```
 
-### Leader-Follower Formation Control
+### Launch Options
 
-For multi-agent formation control, launch the controllers in sequence:
+| Argument | Default | Description |
+|---|---|---|
+| `namespace` | - | ROS 2 namespace for the agent |
+| `use_sim_time` | `False` | Synchronize with `/clock` topic |
+| `type` | `wrench` | `wrench` (force/torque) or `da` (direct allocation) |
+| `use_hill` | `True` | Use Hill frame for MPC (when in orbit) |
+| `use_rviz` | `False` | Launch RViz for visualization and interactive control |
 
-1. **Start the leader controller** (moves between waypoints):
+**Example:**
+
 ```bash
-ros2 launch bsk-ros2-mpc mpc_leader.launch.py
-```
-
-2. **Start the follower controllers** (maintains relative positions to leader):
-```bash
-ros2 launch bsk-ros2-mpc mpc_followers.launch.py
-```
-
-The follower launch file starts MPC controllers for both follower spacecraft simultaneously. 
-
-
-### Launch File Options
-
-The launch files support various configuration options:
-
-#### `mpc.launch.py`
-* `type`: Controller type (`da` for direct allocation, `wrench` for force/torque control)
-* `namespace`: ROS namespace for the spacecraft
-* `use_rviz`: Launch RViz visualizer for interactive control and visualization (default: `False`)
-* `use_hill`: Use Hill frame for MPC (default: `True`)
-* `name_leader`: Namespace of the leader spacecraft (for follower mode)
-* `use_sim_time`: Use simulation time from `/clock` topic (default: `False`)
-
-#### `mpc_leader.launch.py`
-* Configures the leader spacecraft to follow waypoint trajectories
-* Handles position and attitude reference tracking
-
-#### `mpc_followers.launch.py`
-* Launches MPC controllers for follower spacecraft
-* Configures relative position maintenance with respect to the leader
-
-### Examples
-
-**Single Agent - Basic:**
-```bash
-ros2 launch bsk-ros2-mpc mpc.launch.py
-```
-
-**Single Agent - Direct Allocation MPC:**
-```bash
-ros2 launch bsk-ros2-mpc mpc.launch.py type:=da
-```
-
-**Single Agent - Wrench MPC:**
-```bash
-ros2 launch bsk-ros2-mpc mpc.launch.py type:=wrench namespace:=bskSat0
-```
-
-**Single Agent - With RViz Control:**
-```bash
-ros2 launch bsk-ros2-mpc mpc.launch.py use_rviz:=True
-```
-
-**Single Agent - Full Configuration:**
-```bash
-ros2 launch bsk-ros2-mpc mpc.launch.py type:=da namespace:=bskSat0 use_rviz:=True use_hill:=True
-```
-
-**Formation Control - Leader:**
-```bash
-ros2 launch bsk-ros2-mpc mpc_leader.launch.py
-```
-
-**Formation Control - Followers:**
-```bash
-ros2 launch bsk-ros2-mpc mpc_followers.launch.py
+ros2 launch bsk-ros2-mpc mpc.launch.py namespace:=bskSat0 type:=wrench use_rviz:=True use_hill:=True
 ```
 
 ## References
 
 - [Basilisk Astrodynamics Simulation](https://hanspeterschaub.info/basilisk/)
 - [ROS 2 Documentation](https://www.ros.org/)
-- [BSK-ROS2 Bridge](https://github.com/DISCOWER/bsk-ros2-bridge.git)
-
-## License
-
-This project is licensed under the BSD-3-Clause License - see the [LICENSE](LICENSE) file for details.
-
-## Authors
-
-**Elias Krantz**  
-Email: eliaskra@kth.se
+- [acados](https://docs.acados.org/)
+- [Basilisk-ROS 2 Bridge](https://github.com/DISCOWER/bsk-ros2-bridge)
+- [Basilisk-ROS 2 Messages](https://github.com/DISCOWER/bsk-msgs)

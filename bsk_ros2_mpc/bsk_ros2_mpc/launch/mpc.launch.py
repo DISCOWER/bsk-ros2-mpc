@@ -25,7 +25,7 @@ def generate_launch_description():
     )
     type_arg = DeclareLaunchArgument(
         'type',
-        default_value='da',
+        default_value='wrench',
         description='Type of the controller (da, wrench, ...)'
     )
     use_hill_arg = DeclareLaunchArgument(

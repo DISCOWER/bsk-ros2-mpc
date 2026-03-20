@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 ''' Launch Leader's MPC and setpoint publisher '''
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument

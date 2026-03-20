@@ -28,6 +28,7 @@ setup(
         'console_scripts': [
             'bsk-mpc = bsk_ros2_mpc.bsk_mpc:main',
             'bsk-mpc-px4 = bsk_ros2_mpc.bsk_mpc_px4:main',
+            'bsk-transport-centralized = bsk_ros2_mpc.bsk_transport_centralized:main',
             'follower-publisher = bsk_ros2_mpc.bsk_planner.follower_publisher:main',
             'waypoint-publisher = bsk_ros2_mpc.bsk_planner.waypoint_publisher:main',
             'rviz_pose_marker = bsk_ros2_mpc.rviz_pose_marker:main',

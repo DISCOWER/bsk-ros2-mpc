@@ -1,13 +1,12 @@
 #!/usr/bin/env python
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
+
 import numpy as np
 import os
 from scipy.linalg import block_diag
 import casadi as ca
 from acados_template import AcadosOcp, AcadosOcpSolver
 from ..models.bsk_model_da import bsk_model_da
-from ..tools.utils import quat_mult_ca
+from ..tools.utils import quat_error_v_ca, quat_mult_ca
 
 class MpcDa():
     def __init__(self):
@@ -17,7 +16,7 @@ class MpcDa():
         self.Q = np.diag([          # State weighting matrix
             1e0, 1e0, 1e0,
             1e1, 1e1, 1e1, 
-            1e2, 5e1, 5e1, 5e1, 
+            5e1, 5e1, 5e1, 
             1e1, 1e1, 1e1])           
         self.R = 5e-1 * np.eye(6)    # Control weighting matrix
         self.P = 20 * self.Q        # Terminal state weighting matrix
@@ -73,16 +72,18 @@ class MpcDa():
         ocp.cost.W = block_diag(self.Q, self.R)
         ocp.cost.W_e = block_diag(self.P)
 
-        q_ref = x_ref[6:10]
-        q = model.x[6:10]
-        q = q / ca.norm_2(q)
-        q_error = quat_mult_ca(q, ca.vertcat(q_ref[0], -q_ref[1], -q_ref[2], -q_ref[3]))
-        q_error = q_error * ca.sign(q_error[0])
+        # q_ref = x_ref[6:10]
+        # q = model.x[6:10]
+        # q = q / ca.norm_2(q)
+        # q_error = quat_mult_ca(q, ca.vertcat(q_ref[0], -q_ref[1], -q_ref[2], -q_ref[3]))
+        # q_error = q_error * ca.sign(q_error[0])
+
+        q_error_v = quat_error_v_ca(model.x[6:10], x_ref[6:10])
 
         ocp.model.cost_y_expr = ca.vertcat(
             model.x[0:3] - x_ref[0:3],   # Position error
             model.x[3:6] - x_ref[3:6],   # Velocity error
-            q_error,
+            q_error_v,
             model.x[10:13] - x_ref[10:13],  # Angular velocity error
             model.u - u_ref, # Control error
         )
@@ -90,13 +91,13 @@ class MpcDa():
         ocp.model.cost_y_expr_e = ca.vertcat(
             model.x[0:3] - x_ref[0:3],
             model.x[3:6] - x_ref[3:6],
-            q_error,
+            q_error_v,
             model.x[10:13] - x_ref[10:13],
         )
         ocp.cost.yref = np.zeros(ocp.model.cost_y_expr.shape[0])
-        ocp.cost.yref[6] = 1.0
+        # ocp.cost.yref[6] = 1.0
         ocp.cost.yref_e = np.zeros(ocp.model.cost_y_expr_e.shape[0])
-        ocp.cost.yref_e[6] = 1.0
+        # ocp.cost.yref_e[6] = 1.0
 
         # Set constraints on U
         ocp.constraints.lbu = model.u_min

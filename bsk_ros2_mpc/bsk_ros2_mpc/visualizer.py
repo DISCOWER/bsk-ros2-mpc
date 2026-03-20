@@ -1,8 +1,5 @@
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
-
+#!/usr/bin/env python
 import numpy as np
-
 from .tools.utils import MRP2quat
 import rclpy
 from rclpy.node import Node

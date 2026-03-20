@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
 
 import casadi as ca
 import numpy as np

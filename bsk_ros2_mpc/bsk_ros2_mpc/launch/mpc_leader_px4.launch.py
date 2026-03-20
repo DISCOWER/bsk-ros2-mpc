@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 ''' Launch the leader MPC and waypoint publisher with PX4 messages '''
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument

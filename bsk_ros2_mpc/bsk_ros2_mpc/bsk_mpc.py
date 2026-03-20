@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
 
 import numpy as np
 import rclpy
@@ -437,10 +435,6 @@ class BskMpc(Node):
 
         torque_msg = CmdTorqueBodyMsgPayload()
         torque_msg.stamp = self.get_clock().now().to_msg()
-
-        # Convert elements of u less than 3e-2 to zero
-        u[:3][np.abs(u[:3]) < 3e-2] = 0.0
-        u[3:][np.abs(u[3:]) < 5e-3] = 0.0
 
         force_msg.forcerequestbody = u[:3]
         torque_msg.torquerequestbody = u[3:6]

@@ -8,9 +8,8 @@ The controller receives spacecraft states from a running Basilisk simulation ove
 
 ### Prerequisites
 
-- [Basilisk-ROS 2 Bridge](https://github.com/DISCOWER/bsk-ros2-bridge) (installed and sourced)
 - [Basilisk-ROS 2 Messages](https://github.com/DISCOWER/bsk-msgs)
-- [Acados](https://docs.acados.org/installation/)
+- [acados](https://docs.acados.org/installation/)
 
 ### Install
 
@@ -67,6 +66,14 @@ Multi-agent avoidance example (track bskSat1 and bskSat2)
 ```bash
 ros2 launch bsk-ros2-mpc mpc.launch.py namespace:=bskSat0 type:=wrench name_others:="bskSat1 bskSat2"
 ```
+
+## Troubleshooting
+
+**Missing `acados` dependencies**: If the launch fails during solver generation, ensure the Python package `acados_template` is installed and that `$ACADOS_SOURCE_DIR` is correctly exported in your `.bashrc`.
+
+**Shared library error**: If you encounter `ImportError: libacados.so: cannot open shared object file`, ensure your `$LD_LIBRARY_PATH` includes `$ACADOS_SOURCE_DIR/lib`.
+
+**Missing message types**: If you receive errors about unknown types, ensure `bsk_msgs` and `bsk_mpc_msgs` are built and your workspace is fully sourced.
 
 ## References
 

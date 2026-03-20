@@ -18,7 +18,7 @@ The controller receives spacecraft states from a running Basilisk simulation ove
 cd your_ros2_workspace/src
 git clone https://github.com/DISCOWER/bsk-ros2-mpc.git
 cd ..
-colcon build --packages-select bsk-ros2-mpc
+colcon build --packages-up-to bsk-ros2-mpc
 source install/setup.bash
 ```
 
@@ -32,26 +32,40 @@ Before launching any MPC controller, ensure the **Basilisk simulation** and the 
 ros2 launch bsk-ros2-mpc mpc.launch.py
 ```
 
-To use RViz visualization and interactive control:
+Without RViz visualization and interactive control:
 
 ```bash
-ros2 launch bsk-ros2-mpc mpc.launch.py use_rviz:=True
+ros2 launch bsk-ros2-mpc mpc.launch.py use_rviz:=False
 ```
 
 ### Launch Options
 
 | Argument | Default | Description |
 |---|---|---|
-| `namespace` | - | ROS 2 namespace for the agent |
+| `namespace` | `bskSat` | ROS 2 namespace for the agent |
 | `use_sim_time` | `False` | Synchronize with `/clock` topic |
 | `type` | `wrench` | `wrench` (force/torque) or `da` (direct allocation) |
 | `use_hill` | `True` | Use Hill frame for MPC (when in orbit) |
-| `use_rviz` | `False` | Launch RViz for visualization and interactive control |
+| `use_rviz` | `True` | Launch RViz for visualization and interactive control |
+| `name_leader` | `""` | Leader namespace (used by `follower_wrench`) |
+| `name_others` | `""` | Space-separated namespaces of other agents for collision avoidance |
+| `skip_build` | `False` | Skip acados solver codegen/build and reuse an existing compiled solver |
+
+Notes:
+
+- `name_others` enables multi-agent avoidance by passing other agents' positions into MPC constraints. Leave it empty for single-agent runs.
+- `skip_build:=True` is useful for faster startup when the solver has already been generated for the same controller/model configuration.
 
 **Example:**
 
+Simple
 ```bash
-ros2 launch bsk-ros2-mpc mpc.launch.py namespace:=bskSat0 type:=wrench use_rviz:=True use_hill:=True
+ros2 launch bsk-ros2-mpc mpc.launch.py namespace:=bskSat0 type:=wrench use_hill:=False use_rviz:=False
+```
+
+Multi-agent avoidance example (track bskSat1 and bskSat2)
+```bash
+ros2 launch bsk-ros2-mpc mpc.launch.py namespace:=bskSat0 type:=wrench name_others:="bskSat1 bskSat2"
 ```
 
 ## References

@@ -2,14 +2,18 @@
 
 import numpy as np
 import os
+import time
 from scipy.linalg import block_diag
 import casadi as ca
 from acados_template import AcadosOcp, AcadosOcpSolver
 from ..models.bsk_model_wrench import bsk_model_wrench
-from ..tools.utils import quat_error_v_ca, quat_mult_ca
+from ..tools.utils import quat_error_v_ca
 
 class MpcWrench():
-    def __init__(self, n_others=0):
+    def __init__(self, n_others=0, skip_build=False):
+        # Skip Acados code generation and compilation if True (rebuild needed if model or parameters change)
+        self.skip_build = skip_build
+
         # Define the controller parameters
         self.dt = 0.2               # MPC time step [s]
         self.Nx = 30                # Prediction horizon, states             
@@ -80,26 +84,13 @@ class MpcWrench():
         ocp.cost.W = block_diag(self.Q, self.R)
         ocp.cost.W_e = block_diag(self.P)
 
-        # q_ref = x_ref[6:10]
-        # q = model.x[6:10]
-        # q = q / ca.norm_2(q)
-        # q_error = quat_mult_ca(q, ca.vertcat(q_ref[0], -q_ref[1], -q_ref[2], -q_ref[3]))
-        # q_error = q_error * ca.sign(q_error[0])
-
-        # q_ref = x_ref[6:10]
-        # q = model.x[6:10]
-        # q = q / (ca.norm_2(q) + 1e-8)
-        # q_ref = ca.sign(ca.dot(q, q_ref)) * q_ref # Ensure q_ref has the same sign as q to avoid discontinuity
-        # q_error = quat_mult_ca(ca.vertcat(q_ref[0], -q_ref[1], -q_ref[2], -q_ref[3]), q)   # q_e = q_ref^{-1} X q
-
         q_error_v = quat_error_v_ca(model.x[6:10], x_ref[6:10])
-
         ocp.model.cost_y_expr = ca.vertcat(
-            model.x[0:3] - x_ref[0:3],   # Position error
-            model.x[3:6] - x_ref[3:6],   # Velocity error
-            q_error_v,  # Attitude error (vector part of quaternion error)
-            model.x[10:13] - x_ref[10:13],  # Angular velocity error
-            model.u - u_ref, # Control error
+            model.x[0:3] - x_ref[0:3],          # Position error
+            model.x[3:6] - x_ref[3:6],          # Velocity error
+            q_error_v,                          # Attitude error (vector part of quaternion error)
+            model.x[10:13] - x_ref[10:13],      # Angular velocity error
+            model.u - u_ref,                    # Control error
         )
         # Terminal cost 
         ocp.model.cost_y_expr_e = ca.vertcat(
@@ -109,9 +100,7 @@ class MpcWrench():
             model.x[10:13] - x_ref[10:13],
         )
         ocp.cost.yref = np.zeros(ocp.model.cost_y_expr.shape[0])
-        # ocp.cost.yref[6] = 1.0
         ocp.cost.yref_e = np.zeros(ocp.model.cost_y_expr_e.shape[0])
-        # ocp.cost.yref_e[6] = 1.0
 
         # Set constraints on U
         ocp.constraints.lbu = model.u_min
@@ -177,10 +166,54 @@ class MpcWrench():
         ocp.solver_options.sim_method_num_steps = 3
         ocp.solver_options.print_level = 0
 
-        ocp_solver = AcadosOcpSolver(ocp, json_file=json_path)
+        ocp_solver = AcadosOcpSolver(ocp, json_file=json_path, 
+                                      generate=not self.skip_build,
+                                      build=not self.skip_build)
         return ocp_solver
 
+    def reset_solver(self, x0):
+        """Full trajectory reset: clear solver internals first, then seed all stages with x0."""
+        self.solver.reset()
+        x_flat = x0.flatten().copy()
+        q = x_flat[6:10]
+        norm = np.linalg.norm(q)
+        if norm > 1e-6:
+            x_flat[6:10] = q / norm
+        else:
+            # fallback to identity quaternion
+            x_flat[6] = 1.0
+            x_flat[7:10] = 0.0
+        for k in range(self.Nx + 1):
+            self.solver.set(k, "x", x_flat)
+        for k in range(self.Nx):
+            self.solver.set(k, "u", np.zeros(self.nu))
+
+    def _detect_discontinuity(self, x0, dt):
+        """Return True if any body's position or velocity is inconsistent with kinematics."""
+        a_max = 0.5  # [m/s^2]
+        # 3x margin over nominal a_max*dt^2/2 and a_max*dt, with absolute floors
+        margin = 3.0
+        pos_tol = max(margin * a_max * dt**2/2, 0.05)  # [m]
+        vel_tol = max(margin * a_max * dt, 0.1)      # [m/s]
+
+        p, v = x0[:3], x0[3:6]
+        p_prev, v_prev = self._prev_x0[:3], self._prev_x0[3:6]
+
+        if np.linalg.norm(p - (p_prev + v_prev * dt)) > pos_tol or np.linalg.norm(v - v_prev) > vel_tol:
+            return True
+        return False
+
     def get_input(self, x0, x_ref, x_others=[]):
+        # Detect sudden state discontinuities
+        now = time.perf_counter()
+        if hasattr(self, '_prev_x0') and hasattr(self, '_prev_call_time'):
+            dt_call = now - self._prev_call_time
+            if dt_call <= 0.0 or dt_call > 10.0 or self._detect_discontinuity(x0, dt_call):
+                print("State discontinuity detected - resetting solver trajectory.")
+                self.reset_solver(x0)
+        self._prev_call_time = now
+        self._prev_x0 = x0.copy()
+
         # Properly set x0, i.e. constrain it to x0
         self.solver.set(0, "lbx", x0.flatten())
         self.solver.set(0, "ubx", x0.flatten())
@@ -215,12 +248,24 @@ class MpcWrench():
         status = self.solver.solve()
         u_opt = self.solver.get(0, 'u')
         if status != 0:
-            print("Solver failed. Retrying with warm-start reset.")
-            self.solver.reset()
+            print(f"Solver failed with status {status}. Resetting.")
+            self.reset_solver(x0)
+            self.solver.set(0, "lbx", x0.flatten())
+            self.solver.set(0, "ubx", x0.flatten())
             status = self.solver.solve()
+            if status == 0:
+                u_opt = self.solver.get(0, 'u')
             if status != 0:
-                print("Solver failed again. Using previous solution.")
-                u_opt =  self.solver.get(1, 'u')
+                print(f"Still failing. Cold-starting from current state.")
+                self.reset_solver(x0)
+                self.solver.set(0, "lbx", x0.flatten())
+                self.solver.set(0, "ubx", x0.flatten())
+                status = self.solver.solve()
+                if status == 0:
+                    u_opt = self.solver.get(0, 'u')
+                else:
+                    print(f"Solver failed completely. Zeroing controls.")
+                    u_opt = np.zeros(self.nu)
         
         # get solution
         x_pred = np.ndarray((self.Nx+1, self.nx))

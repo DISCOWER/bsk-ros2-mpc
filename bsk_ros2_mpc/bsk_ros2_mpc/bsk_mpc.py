@@ -31,6 +31,7 @@ class BskMpc(Node):
         self.vehicle_local_position = np.array([0.0, 0.0, 0.0])
         self.vehicle_angular_velocity = np.array([0.0, 0.0, 0.0])
         self.vehicle_local_velocity = np.array([0.0, 0.0, 0.0])
+        self.vehicle_state_timestamp = 0
         self.setpoint_position = np.array([0.0, 0.0, 0.0])
         self.setpoint_velocity = np.array([0.0, 0.0, 0.0])
         self.setpoint_attitude = np.array([1.0, 0.0, 0.0, 0.0])
@@ -39,18 +40,18 @@ class BskMpc(Node):
         # Create Spacecraft and controller objects
         if self.type == 'da':
             from bsk_ros2_mpc.controllers.mpc_da import MpcDa
-            self.mpc = MpcDa()
+            self.mpc = MpcDa(n_others=self.n_others, skip_build=self.skip_build)
             self.control = np.zeros((self.mpc.nu, 1))
         elif self.type == 'wrench':
             from bsk_ros2_mpc.controllers.mpc_wrench import MpcWrench
-            self.mpc = MpcWrench()
+            self.mpc = MpcWrench(n_others=self.n_others, skip_build=self.skip_build)
             self.control = np.zeros((self.mpc.nu, 1))
         elif self.type == 'follower_wrench':
             from bsk_ros2_mpc.controllers.mpc_follower_wrench import MpcFollowerWrench
             self.mpc = MpcFollowerWrench(1) # Assuming 1 other agent (the leader)
             self.control = np.zeros((self.mpc.nu, 1))
 
-        # Initialize others' odometry and predicted path
+        # Initialize others' state and predicted path
         self.leader = {
             "state": {
                 "timestamp": np.zeros(1),
@@ -67,13 +68,31 @@ class BskMpc(Node):
                 "angular_velocity": [],
             }
         }
+
+        # Initialize others' state and predicted path
+        self.others = {
+            name: {
+                "state": {
+                    "timestamp": np.zeros(1),
+                    "position": np.zeros(3),
+                    "velocity": np.zeros(3),
+                },
+                "pred_path": {
+                    "timestamps": [],
+                    "positions": [],
+                }
+            }
+            for name in self.name_others
+        }
     
     def _setup_parameters(self):
         """Configure ROS parameters for port settings."""
         self.declare_parameter('type', 'da')
         self.declare_parameter('use_hill', True)
         self.declare_parameter('name_leader', '')
+        self.declare_parameter('name_others', '')
         self.declare_parameter('use_rviz', False)
+        self.declare_parameter('skip_build', False)
 
         # use_sim_time is automatically declared by ROS2, just get its value
         self.use_sim_time = self.get_parameter('use_sim_time').get_parameter_value().bool_value
@@ -82,8 +101,15 @@ class BskMpc(Node):
         self.use_hill = self.get_parameter('use_hill').get_parameter_value().bool_value
         self.get_logger().info(f"Use Hill frame: {self.use_hill}")
         self.name_leader = self.get_parameter('name_leader').get_parameter_value().string_value
+        self.get_logger().info(f"Leader name: {self.name_leader}")
+        self.name_others = self.get_parameter('name_others').get_parameter_value().string_value
+        self.name_others = self.name_others.split() if self.name_others else []
+        self.n_others = len(self.name_others)
+        self.get_logger().info(f"Other agents' names: {self.name_others}")
         self.use_rviz = self.get_parameter('use_rviz').get_parameter_value().bool_value
         self.get_logger().info(f"Using RViz: {self.use_rviz}")
+        self.skip_build = self.get_parameter('skip_build').get_parameter_value().bool_value
+        self.get_logger().info(f"Skip acados build: {self.skip_build}")
 
     def wait_for_clock(self):
         """Wait for the /clock topic to start publishing."""
@@ -134,6 +160,16 @@ class BskMpc(Node):
                 self.hill_rot_callback,
                 qos_profile
             )
+
+            # Subscribe to other agents' hill frame states
+            self.others_hill_trans_sub = [
+                    self.create_subscription(
+                    HillRelStateMsgPayload,
+                    f'/{name}/bsk/out/hill_trans_state',
+                    lambda msg, n=name: self.others_hill_trans_callback(msg, n),
+                    qos_profile) for name in self.name_others
+                ]
+    
         else:
             self.sc_state_sub = self.create_subscription(
                 SCStatesMsgPayload, 
@@ -141,6 +177,15 @@ class BskMpc(Node):
                 self.sc_state_callback, 
                 qos_profile
             )
+
+            self.others_state_sub = [
+                    self.create_subscription(
+                    SCStatesMsgPayload,
+                    f'/{name}/bsk/out/sc_states',
+                    lambda msg, n=name: self.others_sc_state_callback(msg, n),
+                    qos_profile) for name in self.name_others
+                ]
+            
         if self.use_rviz:
             self.set_pose_srv = self.create_service(
                 SetPose,
@@ -154,6 +199,7 @@ class BskMpc(Node):
                 self.setpoint_pose_callback,
                 0
             )
+
         if self.type == 'follower_wrench':
             if self.use_hill:
                 self.leader_hill_trans_sub = self.create_subscription(
@@ -176,12 +222,19 @@ class BskMpc(Node):
                     qos_profile
                 )
             self.leader_traj_sub = [
-                self.create_subscription(
-                Path,
-                f'/{self.name_leader}/bsk_mpc/predicted_path',
-                self.leader_pred_callback,
-                10)
-            ]
+                    self.create_subscription(
+                    Path,
+                    f'/{self.name_leader}/bsk_mpc/predicted_path',
+                    self.leader_pred_callback,
+                    10)
+                ]
+            self.others_pred_sub = [
+                    self.create_subscription(
+                    Path,
+                    f'/{name}/bsk_mpc/predicted_path',
+                    lambda msg, n=name: self.others_pred_callback(msg, n),
+                    10) for name in self.name_others
+                ]
 
         # Publishers
         self.predicted_path_pub = self.create_publisher(
@@ -237,6 +290,7 @@ class BskMpc(Node):
         # position and velocity in inertial frame
         # attitude in body to inertial frame
         # angular velocity in body frame
+        self.vehicle_state_timestamp = msg.stamp.sec * 1_000_000_000 + msg.stamp.nanosec
         self.vehicle_local_position = msg.r_bn_n
         self.vehicle_local_velocity = msg.v_bn_n
         q_nb = MRP2quat(np.array(msg.sigma_bn), ref_quat=self.setpoint_attitude)
@@ -245,6 +299,7 @@ class BskMpc(Node):
     
     def hill_trans_callback(self, msg: HillRelStateMsgPayload):
         # position and velocity in Hill frame
+        self.vehicle_state_timestamp = msg.stamp.sec * 1_000_000_000 + msg.stamp.nanosec
         self.vehicle_local_position = msg.r_dc_h
         self.vehicle_local_velocity = msg.v_dc_h            
 
@@ -266,6 +321,7 @@ class BskMpc(Node):
 
     def leader_hill_trans_callback(self, msg: HillRelStateMsgPayload):
         # position and velocity in Hill frame
+        self.leader["state"]["timestamp"] = msg.stamp.sec * 1_000_000_000 + msg.stamp.nanosec
         self.leader["state"]["position"] = msg.r_dc_h
         self.leader["state"]["velocity"] = msg.v_dc_h
     
@@ -309,6 +365,32 @@ class BskMpc(Node):
             pred['velocity'].append(vel)
             pred['attitude'].append(att)
             pred['angular_velocity'].append(ang_vel)
+
+    def others_sc_state_callback(self, msg: SCStatesMsgPayload, name):
+        self.others[name]["state"]["timestamp"] = msg.stamp.sec * 1_000_000_000 + msg.stamp.nanosec
+        self.others[name]["state"]["position"] = msg.r_bn_n
+        self.others[name]["state"]["velocity"] = msg.v_bn_n
+
+    def others_hill_trans_callback(self, msg: HillRelStateMsgPayload, name):
+        self.others[name]["state"]["timestamp"] = msg.stamp.sec * 1_000_000_000 + msg.stamp.nanosec
+        self.others[name]["state"]["position"] = msg.r_dc_h
+        self.others[name]["state"]["velocity"] = msg.v_dc_h
+
+    def others_pred_callback(self, msg: Path, name):
+        pred = self.others[name]['pred_path']
+        # Reset stored prediction
+        pred['timestamps'].clear()
+        pred['positions'].clear()
+        for pose_stamped in msg.poses:
+            t = pose_stamped.header.stamp
+            timestamp_ns = 1e9 * t.sec + t.nanosec
+            pos = np.array([
+                pose_stamped.pose.position.x,
+                pose_stamped.pose.position.y,
+                pose_stamped.pose.position.z
+            ])
+            pred['timestamps'].append(timestamp_ns)
+            pred['positions'].append(pos)
     
     def add_setpoint_pose_callback(self, request, response):
         self.setpoint_position[0] = request.pose.position.x
@@ -474,6 +556,35 @@ class BskMpc(Node):
                 self.vehicle_angular_velocity[1],
                 self.vehicle_angular_velocity[2]]).reshape(13, 1)
 
+        t0_ns = int(self.vehicle_state_timestamp) if int(self.vehicle_state_timestamp) > 0 else self.get_clock().now().nanoseconds
+        
+        use_other_traj = False
+        if use_other_traj:
+            # Use predicted paths of other spacecraft
+            x_others = [
+                sample_other_path(
+                    t0=t0_ns,
+                    dt=self.mpc.dt,
+                    Nx=self.mpc.Nx + 1,
+                    t_other=self.others[name]['pred_path']['timestamps'],
+                    pos_other=self.others[name]['pred_path']['positions'],
+                )
+                for name in self.name_others if self.others[name]['pred_path']['timestamps']
+            ]
+        else:
+            # Use current state of other spacecraft
+            x_others = [
+                sample_other_path(
+                    t0=t0_ns,
+                    dt=self.mpc.dt,
+                    Nx=self.mpc.Nx + 1,
+                    t_other=[self.others[name]['state']['timestamp']],
+                    pos_other=[self.others[name]['state']['position']],
+                    vel_other=[self.others[name]['state']['velocity']],
+                )
+                for name in self.name_others
+            ]
+
         # Set state and references for each MPC
         if self.type == 'da' or self.type == 'wrench':
             x_ref = np.concatenate((self.setpoint_position,     # position
@@ -483,7 +594,7 @@ class BskMpc(Node):
             x_ref = np.repeat(x_ref.reshape((-1, 1)), self.mpc.Nx + 1, axis=1)
             
             # Get control input
-            self.control, x_pred = self.mpc.get_input(x0, x_ref)
+            self.control, x_pred = self.mpc.get_input(x0, x_ref, x_others=x_others)
 
             # Publish current state
             self.publish_current_state(
@@ -510,10 +621,10 @@ class BskMpc(Node):
                                     reference_velocity,                # velocity
                                     reference_attitude,                # attitude
                                     reference_angular_rate), axis=0)   # angular velocity
-                # Use current odometry of other spacecraft
+                # Use current state of other spacecraft
                 x_others = [
                     sample_other_path(
-                        t0=self.get_clock().now().nanoseconds,
+                        t0=t0_ns,
                         dt=self.mpc.dt,
                         Nx=self.mpc.Nx + 1,
                         t_other=[self.leader['state']['timestamp']],
@@ -536,7 +647,7 @@ class BskMpc(Node):
                 # Use predicted paths of other spacecraft
                 x_others = [
                     sample_other_path(
-                        t0=self.get_clock().now().nanoseconds,
+                        t0=t0_ns,
                         dt=self.mpc.dt,
                         Nx=self.mpc.Nx + 1,
                         t_other=self.leader['trajectory']['timestamps'],

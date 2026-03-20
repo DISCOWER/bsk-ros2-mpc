@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 ''' Launch 2 follower MPC's and setpoint publishers with PX4 messages '''
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
 
 from launch import LaunchDescription
 from launch_ros.actions import Node

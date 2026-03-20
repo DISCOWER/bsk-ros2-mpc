@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
 
 import casadi as ca
 import numpy as np
@@ -25,7 +23,7 @@ def quat_mult(q1, q2):
 def quat_derivative(q, w):
     return 0.5 * quat_mult(q, ca.vertcat(0, w))
 
-def bsk_model_da():
+def bsk_model_da(n_others=0):
     model = AcadosModel()
     model.name = 'bsk_model_da'
 
@@ -37,6 +35,8 @@ def bsk_model_da():
     inertia = np.diag([0.315]*3)
     inertia_inv = np.linalg.inv(inertia)
 
+    d_min_sqr = (0.6 * 1)**2
+
     # states
     p = ca.MX.sym('p', 3)
     v = ca.MX.sym('v', 3)
@@ -47,10 +47,11 @@ def bsk_model_da():
     # controls
     u = ca.MX.sym('u', 6)
 
-    # reference
+    # reference and other agents
     x_ref = ca.MX.sym('x_ref', x.size()[0])
     u_ref = ca.MX.sym('u_ref', u.size()[0])
-    model.p = ca.vertcat(x_ref, u_ref)
+    p_others = ca.MX.sym('p_others', 3 * n_others)
+    model.p = ca.vertcat(x_ref, u_ref, p_others)
 
     # dynamics
     B_F = F_thr * ca.vertcat(
@@ -85,5 +86,18 @@ def bsk_model_da():
     # limits
     model.u_min = np.array([-1]*6)
     model.u_max = np.array([1]*6)
+
+    # Collision avoidance constraints
+    dist_constraints = []
+    for i in range(n_others):
+        dist = ca.sumsqr(x[:3] - p_others[3*i:3*(i+1)])
+        dist_constraints.append(d_min_sqr - dist)
+
+    if n_others > 0:
+        model.con_h_expr = ca.vertcat(*dist_constraints)
+        model.con_h_expr_e = ca.vertcat(*dist_constraints)
+    else:
+        model.con_h_expr = ca.MX.zeros(0, 1)
+        model.con_h_expr_e = ca.MX.zeros(0, 1)
 
     return model

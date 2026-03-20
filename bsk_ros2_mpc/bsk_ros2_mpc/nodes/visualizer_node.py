@@ -1,9 +1,6 @@
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
-
+#!/usr/bin/env python
 import numpy as np
-
-from .tools.utils import MRP2quat
+from ..tools.utils import MRP2quat
 import rclpy
 from rclpy.node import Node
 from rclpy.clock import Clock
@@ -13,7 +10,7 @@ from bsk_msgs.msg import HillRelStateMsgPayload, AttGuidMsgPayload, SCStatesMsgP
 from geometry_msgs.msg import PoseStamped, Point
 from nav_msgs.msg import Path
 from visualization_msgs.msg import Marker
-from mpc_msgs.srv import SetPose
+from bsk_mpc_msgs.srv import SetPose
 
 class BskMpcVisualizer(Node):
     def __init__(self):
@@ -22,6 +19,11 @@ class BskMpcVisualizer(Node):
         self.declare_parameter('use_hill', True)
         self.use_hill = self.get_parameter('use_hill').get_parameter_value().bool_value
         self.get_logger().info(f"Use Hill frame: {self.use_hill}")
+        self.declare_parameter('name_others', '')
+        self.name_others = self.get_parameter('name_others').get_parameter_value().string_value
+        self.name_others = self.name_others.split() if self.name_others else []
+        self.get_logger().info(f"Other agents' names: {self.name_others}")
+        self.other_agents_positions = {name: np.zeros(3) for name in self.name_others}
 
         # QoS profile
         qos_profile = QoSProfile(
@@ -45,6 +47,15 @@ class BskMpcVisualizer(Node):
                 self.hill_rot_callback,
                 qos_profile
             )
+            self.others_hill_trans_sub = [
+                self.create_subscription(
+                    HillRelStateMsgPayload,
+                    f'/{name}/bsk/out/hill_trans_state',
+                    lambda msg, n=name: self.others_hill_trans_callback(msg, n),
+                    qos_profile,
+                )
+                for name in self.name_others
+            ]
         else:
             self.sc_state_sub = self.create_subscription(
                 SCStatesMsgPayload, 
@@ -52,6 +63,15 @@ class BskMpcVisualizer(Node):
                 self.sc_state_callback, 
                 qos_profile
             )
+            self.others_sc_state_sub = [
+                self.create_subscription(
+                    SCStatesMsgPayload,
+                    f'/{name}/bsk/out/sc_states',
+                    lambda msg, n=name: self.others_sc_state_callback(msg, n),
+                    qos_profile,
+                )
+                for name in self.name_others
+            ]
         self.setpoint_pose_srv = self.create_service(
             SetPose,
             'set_pose',
@@ -70,6 +90,9 @@ class BskMpcVisualizer(Node):
         )
         self.setpoint_path_pub = self.create_publisher(
             Path, f"bsk_visualizer/setpoint_path", 10
+        )
+        self.other_agents_marker_pub = self.create_publisher(
+            Marker, f"bsk_visualizer/other_agents_markers", 10
         )
 
         self.vehicle_attitude = np.array([1.0, 0.0, 0.0, 0.0])
@@ -136,6 +159,12 @@ class BskMpcVisualizer(Node):
         self.vehicle_attitude = q_nb
         self.vehicle_angular_velocity = msg.omega_br_b
 
+    def others_hill_trans_callback(self, msg: HillRelStateMsgPayload, name):
+        self.other_agents_positions[name] = np.array(msg.r_dc_h)
+
+    def others_sc_state_callback(self, msg: SCStatesMsgPayload, name):
+        self.other_agents_positions[name] = np.array(msg.r_bn_n)
+
     def add_setpoint_pose_callback(self, request, response):
         # Extract and normalize quaternion
         new_attitude = np.array([
@@ -183,6 +212,27 @@ class BskMpcVisualizer(Node):
         msg.points = [tail_point, head_point]
         return msg
 
+    def create_other_agent_sphere_marker(self, marker_id, position):
+        msg = Marker()
+        msg.action = Marker.ADD
+        msg.header.frame_id = "map"
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.ns = "other_agents"
+        msg.id = marker_id
+        msg.type = Marker.SPHERE
+        msg.scale.x = 0.6
+        msg.scale.y = 0.6
+        msg.scale.z = 0.6
+        msg.color.r = 0.5
+        msg.color.g = 0.5
+        msg.color.b = 0.5
+        msg.color.a = 0.5
+        msg.pose.orientation.w = 1.0
+        msg.pose.position.x = float(position[0])
+        msg.pose.position.y = float(position[1])
+        msg.pose.position.z = float(position[2])
+        return msg
+
     def append_vehicle_path(self, msg):
         self.vehicle_path_msg.poses.append(msg)
         if len(self.vehicle_path_msg.poses) > self.trail_size:
@@ -214,6 +264,12 @@ class BskMpcVisualizer(Node):
         velocity_msg = self.create_arrow_marker(1, self.vehicle_local_position, self.vehicle_local_velocity)
         self.vehicle_vel_pub.publish(velocity_msg)
 
+        # Publish other agents as gray semi-transparent spheres
+        for idx, name in enumerate(self.name_others):
+            pos = self.other_agents_positions[name]
+            self.other_agents_marker_pub.publish(
+                self.create_other_agent_sphere_marker(idx, pos)
+            )
 
 def main(args=None):
     rclpy.init(args=args)

@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
 
 import numpy as np
 import rclpy
@@ -9,7 +7,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped, Vector3Stamped
-from .tools.utils import sample_other_path
+from ..tools.utils import sample_other_path
 
 from px4_msgs.msg import OffboardControlMode
 from px4_msgs.msg import VehicleStatus

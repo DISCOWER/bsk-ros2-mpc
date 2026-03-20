@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 ''' Launch the MPC node '''
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
@@ -38,17 +36,29 @@ def generate_launch_description():
         default_value='',
         description='Namespace of the leader spacecraft'
     )
+    name_others_arg = DeclareLaunchArgument(
+        'name_others',
+        default_value='',
+        description='Namespaces of other spacecraft, separated by spaces'
+    )
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz',
-        default_value='False',
+        default_value='True',
         description='Launch RViz visualizer'
+    )
+    skip_build_arg = DeclareLaunchArgument(
+        'skip_build',
+        default_value='False',
+        description='Skip building acados solver (set to True to use existing compiled code)'
     )
     use_sim_time = LaunchConfiguration('use_sim_time')
     namespace = LaunchConfiguration('namespace')
     type = LaunchConfiguration('type')
     use_hill = LaunchConfiguration('use_hill')
     name_leader = LaunchConfiguration('name_leader')
+    name_others = LaunchConfiguration('name_others')
     use_rviz = LaunchConfiguration('use_rviz')
+    skip_build = LaunchConfiguration('skip_build')
 
     ld = LaunchDescription()
     ld.add_action(use_sim_time_arg)
@@ -56,7 +66,9 @@ def generate_launch_description():
     ld.add_action(type_arg)
     ld.add_action(use_hill_arg)
     ld.add_action(name_leader_arg)
+    ld.add_action(name_others_arg)
     ld.add_action(use_rviz_arg)
+    ld.add_action(skip_build_arg)
 
     # Launch MPC
     ld.add_action(Node(
@@ -67,10 +79,13 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[
             {'use_sim_time': use_sim_time},
-            {'use_rviz': use_rviz},
             {'type': type},
             {'use_hill': use_hill},
-            {'name_leader': name_leader}
+            {'name_leader': name_leader},
+            {'name_others': name_others},
+            {'use_rviz': use_rviz},
+            {'skip_build': skip_build}
+
         ]
     ))
 
@@ -92,7 +107,8 @@ def generate_launch_description():
         executable='visualizer',
         name='visualizer',
         parameters=[
-            {'use_hill': use_hill}
+            {'use_hill': use_hill},
+            {'name_others': name_others}
         ],
         condition=IfCondition(use_rviz)
     ))
@@ -110,7 +126,7 @@ def patch_rviz_config(original_config_path, namespace):
 
     # Replace placeholder with actual namespace
     content = content.replace('__NS__', f'/{namespace}' if namespace else '')
-    
+
     # Write to temporary file
     tmp_rviz_config = tempfile.NamedTemporaryFile(delete=False, suffix='.rviz')
     tmp_rviz_config.write(content.encode('utf-8'))

@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
 
 import numpy as np
 import os

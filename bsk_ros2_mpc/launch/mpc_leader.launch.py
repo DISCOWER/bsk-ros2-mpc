@@ -1,7 +1,5 @@
 #!/usr/bin/env python
-'''  Launch 2 follower MPC's and setpoint publishers '''
-__author__ = "Elias Krantz"
-__contact__ = "eliaskra@kth.se"
+''' Launch Leader's MPC and setpoint publisher '''
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -14,71 +12,67 @@ def generate_launch_description():
         default_value='False',
         description='Use simulation time from /clock topic'
     )
+    namespace_arg = DeclareLaunchArgument(
+        'namespace',
+        default_value='leaderSc',
+        description='Namespace for all nodes'
+    )
+    type_arg = DeclareLaunchArgument(
+        'type',
+        default_value='wrench',
+        description='Type of the controller (da, wrench, ...)'
+    )
     use_hill_arg = DeclareLaunchArgument(
         'use_hill',
         default_value='True',
         description='Use Hill frame for MPC'
     )
+    period_arg = DeclareLaunchArgument(
+        'period',
+        default_value='20.0',
+        description='Period (seconds) to stay at each waypoint'
+    )
+
     use_sim_time = LaunchConfiguration('use_sim_time')
+    namespace = LaunchConfiguration('namespace')
+    type = LaunchConfiguration('type')
     use_hill = LaunchConfiguration('use_hill')
+    period = LaunchConfiguration('period')
 
     ld = LaunchDescription()
     ld.add_action(use_sim_time_arg)
+    ld.add_action(namespace_arg)
+    ld.add_action(type_arg)
     ld.add_action(use_hill_arg)
+    ld.add_action(period_arg)
 
     # Launch MPC
     ld.add_action(Node(
         package='bsk-ros2-mpc',
-        namespace='followerSc_1',
-        executable='bsk-mpc',
-        name='bsk_mpc',
-        output='screen',
-        emulate_tty=True,
-        parameters=[
-            {'type': 'follower_wrench'},
-            {'use_hill': use_hill},
-            {'name_leader': 'leaderSc'}
-        ]
-    ))
-    ld.add_action(Node(
-        package='bsk-ros2-mpc',
-        namespace='followerSc_2',
+        namespace=namespace,
         executable='bsk-mpc',
         name='bsk_mpc',
         output='screen',
         emulate_tty=True,
         parameters=[
             {'use_sim_time': use_sim_time},
-            {'type': 'follower_wrench'},
-            {'use_hill': use_hill},
-            {'name_leader': 'leaderSc'}
+            {'type': type},
+            {'use_hill': use_hill}
         ]
     ))
 
-    # Launch follower publisher
+    # Launch waypoint publisher
     ld.add_action(Node(
         package='bsk-ros2-mpc',
-        namespace='followerSc_1',
-        executable='follower-publisher',
-        name='follower_publisher',
+        namespace=namespace,
+        executable='waypoint-publisher',
+        name='waypoint_publisher',
         output='screen',
         emulate_tty=True,
         parameters=[
-            {'position': [-1.0, 0.3, 0.0]},
+            {'period': period},
             {'is_sim': True}
-        ]
-    ))
-    ld.add_action(Node(
-        package='bsk-ros2-mpc',
-        namespace='followerSc_2',
-        executable='follower-publisher',
-        name='follower_publisher',
-        output='screen',
-        emulate_tty=True,
-        parameters=[
-            {'position': [-1.0, -0.3, 0.0]},
-            {'is_sim': True}
-        ]
+        ],
     ))
 
     return ld

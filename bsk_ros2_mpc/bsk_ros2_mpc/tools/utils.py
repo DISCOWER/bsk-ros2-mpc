@@ -61,6 +61,16 @@ def MRP2quat(sigma, ref_quat=None):
         quat = -quat
     return quat
 
+def quat_error_v_ca(q, q_ref):
+    q = q / (ca.norm_2(q) + 1e-8) # Normalize to avoid numerical issues
+    q_ref = ca.sign(ca.dot(q, q_ref)) * q_ref # Ensure q_ref has the same sign as q to avoid discontinuity
+    q_error_v = ca.vertcat(
+        q_ref[0]*q[1] - q_ref[1]*q[0] - q_ref[2]*q[3] + q_ref[3]*q[2],
+        q_ref[0]*q[2] + q_ref[1]*q[3] - q_ref[2]*q[0] - q_ref[3]*q[1],
+        q_ref[0]*q[3] - q_ref[1]*q[2] + q_ref[2]*q[1] - q_ref[3]*q[0]
+    )
+    return q_error_v
+
 def sample_other_path(
     t0: float,
     dt: float,

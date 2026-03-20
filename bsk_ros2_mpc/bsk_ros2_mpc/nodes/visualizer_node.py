@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import numpy as np
-from .tools.utils import MRP2quat
+from ..tools.utils import MRP2quat
 import rclpy
 from rclpy.node import Node
 from rclpy.clock import Clock
@@ -10,7 +10,7 @@ from bsk_msgs.msg import HillRelStateMsgPayload, AttGuidMsgPayload, SCStatesMsgP
 from geometry_msgs.msg import PoseStamped, Point
 from nav_msgs.msg import Path
 from visualization_msgs.msg import Marker
-from mpc_msgs.srv import SetPose
+from bsk_mpc_msgs.srv import SetPose
 
 class BskMpcVisualizer(Node):
     def __init__(self):

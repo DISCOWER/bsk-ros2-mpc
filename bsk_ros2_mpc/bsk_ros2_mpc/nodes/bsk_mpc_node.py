@@ -6,8 +6,8 @@ from rclpy.node import Node
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped, Vector3Stamped
 from bsk_msgs.msg import CmdForceBodyMsgPayload, CmdTorqueBodyMsgPayload, SCStatesMsgPayload, THRArrayCmdForceMsgPayload, HillRelStateMsgPayload, AttGuidMsgPayload
-from .tools.utils import MRP2quat, sample_other_path
-from mpc_msgs.srv import SetPose
+from ..tools.utils import MRP2quat, sample_other_path
+from bsk_mpc_msgs.srv import SetPose
 
 class BskMpc(Node):
     def __init__(self):

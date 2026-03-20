@@ -60,7 +60,7 @@ Notes:
 
 Simple
 ```bash
-ros2 launch bsk-ros2-mpc mpc.launch.py namespace:=bskSat0 type:=wrench use_hill:=False use_rviz:=False
+ros2 launch bsk-ros2-mpc mpc.launch.py namespace:=bskSat0 type:=wrench use_hill:=True use_rviz:=True
 ```
 
 Multi-agent avoidance example (track bskSat1 and bskSat2)

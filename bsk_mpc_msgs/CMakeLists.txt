@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(mpc_msgs)
+project(bsk_mpc_msgs)
 
 if(POLICY CMP0148)
   cmake_policy(SET CMP0148 OLD)

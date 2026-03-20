@@ -46,7 +46,7 @@ from visualization_msgs.msg import InteractiveMarkerFeedback
 from visualization_msgs.msg import Marker
 from rclpy.node import Node
 
-from mpc_msgs.srv import SetPose
+from bsk_mpc_msgs.srv import SetPose
 
 def makeBox(msg):
     marker = Marker()

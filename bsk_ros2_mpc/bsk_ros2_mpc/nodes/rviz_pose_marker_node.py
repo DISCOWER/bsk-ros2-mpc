@@ -52,9 +52,9 @@ def makeBox(msg):
     marker = Marker()
 
     marker.type = Marker.SPHERE
-    marker.scale.x = msg.scale * 0.4
-    marker.scale.y = msg.scale * 0.4
-    marker.scale.z = msg.scale * 0.4
+    marker.scale.x = msg.scale * 0.33
+    marker.scale.y = msg.scale * 0.33
+    marker.scale.z = msg.scale * 0.33
     marker.color.r = 1.0
     marker.color.g = 1.0
     marker.color.b = 0.0
@@ -84,7 +84,7 @@ def make6DofMarker(server, menu_handler, process_feedback, fixed, interaction_mo
     int_marker = InteractiveMarker()
     int_marker.header.frame_id = 'map'
     int_marker.pose.position = position
-    int_marker.scale = 0.3
+    int_marker.scale = 0.36
 
     int_marker.name = 'simple_6dof'
 

@@ -33,7 +33,7 @@ def bsk_model_wrench(n_others=0):
     inertia = np.diag([0.315]*3)
     inertia_inv = np.linalg.inv(inertia)
 
-    d_min_sqr = (0.5 * 1)**2
+    d_min_sqr = (0.6 * 1)**2
 
     # states
     p = ca.MX.sym('p', 3)

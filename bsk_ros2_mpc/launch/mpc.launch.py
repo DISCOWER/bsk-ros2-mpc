@@ -107,7 +107,8 @@ def generate_launch_description():
         executable='visualizer',
         name='visualizer',
         parameters=[
-            {'use_hill': use_hill}
+            {'use_hill': use_hill},
+            {'name_others': name_others}
         ],
         condition=IfCondition(use_rviz)
     ))
@@ -125,7 +126,7 @@ def patch_rviz_config(original_config_path, namespace):
 
     # Replace placeholder with actual namespace
     content = content.replace('__NS__', f'/{namespace}' if namespace else '')
-    
+
     # Write to temporary file
     tmp_rviz_config = tempfile.NamedTemporaryFile(delete=False, suffix='.rviz')
     tmp_rviz_config.write(content.encode('utf-8'))

@@ -4,7 +4,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Path
-from geometry_msgs.msg import PoseStamped, Vector3Stamped
+from geometry_msgs.msg import PoseStamped, PointStamped, Vector3Stamped
 from bsk_msgs.msg import CmdForceBodyMsgPayload, CmdTorqueBodyMsgPayload, SCStatesMsgPayload, THRArrayCmdForceMsgPayload, HillRelStateMsgPayload, AttGuidMsgPayload
 from ..tools.utils import MRP2quat, sample_other_path
 from bsk_mpc_msgs.srv import SetPose
@@ -245,6 +245,10 @@ class BskMpc(Node):
             PoseStamped,
             'bsk_mpc/vehicle_pose',
             10)
+        self.vehicle_position_pub = self.create_publisher(
+            PointStamped,
+            'bsk_mpc/position',
+            10)
         self.vehicle_velocity_pub = self.create_publisher(
             Vector3Stamped,
             'bsk_mpc/vehicle_velocity',
@@ -478,6 +482,14 @@ class BskMpc(Node):
         pose_msg.pose.orientation.y = float(attitude[2])
         pose_msg.pose.orientation.z = float(attitude[3])
         self.vehicle_pose_pub.publish(pose_msg)
+        # Publish current position as PointStamped for RViz sphere display.
+        point_msg = PointStamped()
+        point_msg.header.stamp = pose_msg.header.stamp
+        point_msg.header.frame_id = "map"
+        point_msg.point.x = float(position[0])
+        point_msg.point.y = float(position[1])
+        point_msg.point.z = float(position[2])
+        self.vehicle_position_pub.publish(point_msg)
         # Publish velocity
         velocity_msg = Vector3Stamped()
         velocity_msg.header.stamp = pose_msg.header.stamp

@@ -9,7 +9,7 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDur
 from bsk_msgs.msg import HillRelStateMsgPayload, AttGuidMsgPayload, SCStatesMsgPayload
 from geometry_msgs.msg import PoseStamped, Point
 from nav_msgs.msg import Path
-from visualization_msgs.msg import Marker
+from visualization_msgs.msg import Marker, MarkerArray
 from bsk_mpc_msgs.srv import SetPose
 
 class BskMpcVisualizer(Node):
@@ -24,6 +24,7 @@ class BskMpcVisualizer(Node):
         self.name_others = self.name_others.split() if self.name_others else []
         self.get_logger().info(f"Other agents' names: {self.name_others}")
         self.other_agents_positions = {name: np.zeros(3) for name in self.name_others}
+        self.other_agents_seen = {name: False for name in self.name_others}
 
         # QoS profile
         qos_profile = QoSProfile(
@@ -91,8 +92,8 @@ class BskMpcVisualizer(Node):
         self.setpoint_path_pub = self.create_publisher(
             Path, f"bsk_visualizer/setpoint_path", 10
         )
-        self.other_agents_marker_pub = self.create_publisher(
-            Marker, f"bsk_visualizer/other_agents_markers", 10
+        self.other_agents_markers_pub = self.create_publisher(
+            MarkerArray, f"bsk_visualizer/other_agents_markers_array", 10
         )
 
         self.vehicle_attitude = np.array([1.0, 0.0, 0.0, 0.0])
@@ -161,9 +162,11 @@ class BskMpcVisualizer(Node):
 
     def others_hill_trans_callback(self, msg: HillRelStateMsgPayload, name):
         self.other_agents_positions[name] = np.array(msg.r_dc_h)
+        self.other_agents_seen[name] = True
 
     def others_sc_state_callback(self, msg: SCStatesMsgPayload, name):
         self.other_agents_positions[name] = np.array(msg.r_bn_n)
+        self.other_agents_seen[name] = True
 
     def add_setpoint_pose_callback(self, request, response):
         # Extract and normalize quaternion
@@ -233,6 +236,15 @@ class BskMpcVisualizer(Node):
         msg.pose.position.z = float(position[2])
         return msg
 
+    def create_other_agents_marker_array(self):
+        msg = MarkerArray()
+        for idx, name in enumerate(self.name_others):
+            if not self.other_agents_seen[name]:
+                continue
+            pos = self.other_agents_positions[name]
+            msg.markers.append(self.create_other_agent_sphere_marker(idx, pos))
+        return msg
+
     def append_vehicle_path(self, msg):
         self.vehicle_path_msg.poses.append(msg)
         if len(self.vehicle_path_msg.poses) > self.trail_size:
@@ -264,12 +276,8 @@ class BskMpcVisualizer(Node):
         velocity_msg = self.create_arrow_marker(1, self.vehicle_local_position, self.vehicle_local_velocity)
         self.vehicle_vel_pub.publish(velocity_msg)
 
-        # Publish other agents as gray semi-transparent spheres
-        for idx, name in enumerate(self.name_others):
-            pos = self.other_agents_positions[name]
-            self.other_agents_marker_pub.publish(
-                self.create_other_agent_sphere_marker(idx, pos)
-            )
+        # Publish other agents as gray semi-transparent spheres (batched MarkerArray).
+        self.other_agents_markers_pub.publish(self.create_other_agents_marker_array())
 
 def main(args=None):
     rclpy.init(args=args)

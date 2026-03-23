@@ -190,11 +190,13 @@ class MpcWrench():
 
     def _detect_discontinuity(self, x0, dt):
         """Return True if any body's position or velocity is inconsistent with kinematics."""
-        a_max = 0.5  # [m/s^2]
-        # 3x margin over nominal a_max*dt^2/2 and a_max*dt, with absolute floors
-        margin = 3.0
-        pos_tol = max(margin * a_max * dt**2/2, 0.05)  # [m]
-        vel_tol = max(margin * a_max * dt, 0.1)      # [m/s]
+        a_max = 0.2  # [m/s^2]
+        v_max = self.v_max  # [m/s]
+        
+        # compute tolerances for position and velocity
+        margin = 5.0
+        pos_tol = margin * (v_max * dt + a_max * dt**2/2)   # [m]
+        vel_tol = margin * a_max * dt                       # [m/s]
 
         p, v = x0[:3], x0[3:6]
         p_prev, v_prev = self._prev_x0[:3], self._prev_x0[3:6]

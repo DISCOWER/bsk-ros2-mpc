@@ -146,19 +146,16 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: __NS__/bsk_mpc/reference
       Value: true
-    - Class: rviz_default_plugins/Marker
+    - Class: rviz_default_plugins/MarkerArray
       Enabled: true
       Name: Other Agents
-      Selectable: false
-      Namespaces:
-        other_agents: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: __NS__/bsk_visualizer/other_agents_markers
+        Value: __NS__/bsk_visualizer/other_agents_markers_array
       Value: true
   Enabled: true
   Global Options:

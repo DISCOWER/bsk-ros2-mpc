@@ -31,12 +31,6 @@ Before launching any MPC controller, ensure the **Basilisk simulation** and the 
 ros2 launch bsk-ros2-mpc mpc.launch.py
 ```
 
-Without RViz visualization and interactive control:
-
-```bash
-ros2 launch bsk-ros2-mpc mpc.launch.py use_rviz:=False
-```
-
 ### Launch Options
 
 | Argument | Default | Description |
@@ -57,9 +51,9 @@ Notes:
 
 **Example:**
 
-Simple
+Single-agent
 ```bash
-ros2 launch bsk-ros2-mpc mpc.launch.py namespace:=bskSat0 type:=wrench use_hill:=True use_rviz:=True
+ros2 launch bsk-ros2-mpc mpc.launch.py namespace:=bskSat0 type:=wrench use_hill:=True use_rviz:=True skip_build:=False
 ```
 
 Multi-agent avoidance example (track bskSat1 and bskSat2)

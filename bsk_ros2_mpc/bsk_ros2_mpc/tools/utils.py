@@ -163,3 +163,75 @@ def sample_other_path(
                     break
 
     return result
+
+def sample_other_path_safe(
+    t0: float,
+    dt: float,
+    Nx: int,
+    self_position,
+    state_timestamp_ns,
+    state_position,
+    self_velocity=None,
+    state_velocity=None,
+    pred_timestamps=None,
+    pred_positions=None,
+    use_predicted=False,
+    max_age_s=10.0,
+    max_component_distance_m=100.0
+):
+    """
+    Sample another agent trajectory with stale/missing checks and fallback.
+
+    Returns:
+        tuple[np.ndarray, float]: (trajectory, age_s)
+    """
+    state_velocity = np.zeros(3) if state_velocity is None else state_velocity
+    self_velocity = np.zeros(3) if self_velocity is None else self_velocity
+    pred_timestamps = [] if pred_timestamps is None else pred_timestamps
+    pred_positions = [] if pred_positions is None else pred_positions
+
+    self_position = np.asarray(self_position, dtype=np.float64).reshape(3)
+    self_velocity = np.asarray(self_velocity, dtype=np.float64).reshape(3)
+
+    # Use one-step-ahead self estimate to anchor fallback and distance checks.
+    self_anchor = self_position + self_velocity * dt
+    max_distance_m = float(max_component_distance_m)
+    fallback_position = self_anchor + np.array([-max_distance_m, 0.0, 0.0], dtype=np.float64)
+
+    if use_predicted and pred_timestamps and pred_positions:
+        latest_pred_age_s = max((float(t0) - float(pred_timestamps[-1])) * 1e-9, 0.0)
+        if latest_pred_age_s <= max_age_s:
+            return sample_other_path(
+                t0=t0,
+                dt=dt,
+                Nx=Nx,
+                t_other=pred_timestamps,
+                pos_other=pred_positions,
+            ), latest_pred_age_s
+
+    ts_ns = float(state_timestamp_ns)
+    if ts_ns > 0.0:
+        state_age_s = max((float(t0) - ts_ns) * 1e-9, 0.0)
+        state_pos = np.asarray(state_position, dtype=np.float64).reshape(3)
+        state_vel = np.asarray(state_velocity, dtype=np.float64).reshape(3)
+        is_state_valid = np.isfinite(state_pos).all() and np.isfinite(state_vel).all()
+        if is_state_valid and state_age_s <= max_age_s:
+            rel = state_pos - self_anchor
+            if np.linalg.norm(rel) <= max_distance_m:
+                return sample_other_path(
+                    t0=t0,
+                    dt=dt,
+                    Nx=Nx,
+                    t_other=[ts_ns],
+                    pos_other=[state_pos],
+                    vel_other=[state_vel],
+                ), state_age_s
+
+    return sample_other_path(
+        t0=t0,
+        dt=dt,
+        Nx=Nx,
+        t_other=[t0],
+        pos_other=[fallback_position],
+        vel_other=[np.zeros(3)],
+    ), np.inf

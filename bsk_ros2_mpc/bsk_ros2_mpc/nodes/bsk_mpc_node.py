@@ -6,7 +6,7 @@ from rclpy.node import Node
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped, PointStamped, Vector3Stamped
 from bsk_msgs.msg import CmdForceBodyMsgPayload, CmdTorqueBodyMsgPayload, SCStatesMsgPayload, THRArrayCmdForceMsgPayload, HillRelStateMsgPayload, AttGuidMsgPayload
-from ..tools.utils import MRP2quat, sample_other_path
+from ..tools.utils import MRP2quat, sample_other_path, sample_other_path_safe
 from bsk_mpc_msgs.srv import SetPose
 
 class BskMpc(Node):
@@ -570,32 +570,27 @@ class BskMpc(Node):
 
         t0_ns = int(self.vehicle_state_timestamp) if int(self.vehicle_state_timestamp) > 0 else self.get_clock().now().nanoseconds
         
-        use_other_traj = False
-        if use_other_traj:
-            # Use predicted paths of other spacecraft
-            x_others = [
-                sample_other_path(
-                    t0=t0_ns,
-                    dt=self.mpc.dt,
-                    Nx=self.mpc.Nx + 1,
-                    t_other=self.others[name]['pred_path']['timestamps'],
-                    pos_other=self.others[name]['pred_path']['positions'],
-                )
-                for name in self.name_others if self.others[name]['pred_path']['timestamps']
-            ]
-        else:
-            # Use current state of other spacecraft
-            x_others = [
-                sample_other_path(
-                    t0=t0_ns,
-                    dt=self.mpc.dt,
-                    Nx=self.mpc.Nx + 1,
-                    t_other=[self.others[name]['state']['timestamp']],
-                    pos_other=[self.others[name]['state']['position']],
-                    vel_other=[self.others[name]['state']['velocity']],
-                )
-                for name in self.name_others
-            ]
+        # Sample other agents' paths
+        x_others = []
+        for name in self.name_others:
+            pred = self.others[name]['pred_path']
+            state = self.others[name]['state']
+            traj_other, _ = sample_other_path_safe(
+                t0=t0_ns,
+                dt=self.mpc.dt,
+                Nx=self.mpc.Nx + 1,
+                self_position=self.vehicle_local_position,
+                self_velocity=self.vehicle_local_velocity,
+                state_timestamp_ns=state['timestamp'],
+                state_position=state['position'],
+                state_velocity=state['velocity'],
+                pred_timestamps=pred['timestamps'],
+                pred_positions=pred['positions'],
+                use_predicted=False,
+                max_age_s=10.0,
+                max_component_distance_m=100.0,
+            )
+            x_others.append(traj_other)
 
         # Set state and references for each MPC
         if self.type == 'da' or self.type == 'wrench':

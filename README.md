@@ -2,6 +2,8 @@
 
 A Model Predictive Controller (MPC) for spacecraft position and attitude tracking with the [Basilisk astrodynamics framework](https://hanspeterschaub.info/basilisk/) via the [Basilisk-ROS 2 Bridge](https://github.com/DISCOWER/bsk-ros2-bridge), built on the [acados](https://github.com/acados/acados) optimization framework.
 
+![output](https://github.com/user-attachments/assets/e63e2b63-6ea8-46b4-bd38-4e0e89f04ca7)
+
 The controller receives spacecraft states from a running Basilisk simulation over the bridge and publishes optimal thrust commands back in real time. It supports both direct thruster allocation and wrench-level (force/torque) control, and can optionally be operated interactively through RViz.
 
 ## Setup

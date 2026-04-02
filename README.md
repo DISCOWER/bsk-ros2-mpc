@@ -6,6 +6,9 @@ The controller receives spacecraft states from a running Basilisk simulation ove
 
 <img src="https://github.com/user-attachments/assets/958780b9-bff1-495b-803e-ab150b822049" width="1080"/>
 
+_Leader-follower formation flying with three spacecraft controlled via identical ROS 2-based MPC, running in Basilisk simulation (left) and on the [ATMOS](https://atmos.discower.io/) free-flyers at KTH (right). See the [paper](https://arxiv.org/abs/2512.09833) for details._
+
+
 ## Setup
 
 ### Prerequisites
@@ -73,8 +76,8 @@ ros2 launch bsk-ros2-mpc mpc.launch.py namespace:=bskSat0 type:=wrench name_othe
 
 ## References
 
+- [Basilisk-ROS 2 Bridge](https://github.com/DISCOWER/bsk-ros2-bridge)
+- [Basilisk-ROS 2 Messages](https://github.com/DISCOWER/bsk-msgs)
 - [Basilisk Astrodynamics Simulation](https://hanspeterschaub.info/basilisk/)
 - [ROS 2 Documentation](https://www.ros.org/)
 - [acados](https://docs.acados.org/)
-- [Basilisk-ROS 2 Bridge](https://github.com/DISCOWER/bsk-ros2-bridge)
-- [Basilisk-ROS 2 Messages](https://github.com/DISCOWER/bsk-msgs)

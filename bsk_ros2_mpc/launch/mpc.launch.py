@@ -46,11 +46,17 @@ def generate_launch_description():
         default_value='True',
         description='Launch RViz visualizer'
     )
+    px4_mpc_setpoint_arg = DeclareLaunchArgument(
+        'px4_mpc_setpoint',
+        default_value='False',
+        description='Whether to use the published setpoint from px4_mpc'
+    )
     skip_build_arg = DeclareLaunchArgument(
         'skip_build',
         default_value='False',
         description='Skip building acados solver (set to True to use existing compiled code)'
     )
+
     use_sim_time = LaunchConfiguration('use_sim_time')
     namespace = LaunchConfiguration('namespace')
     type = LaunchConfiguration('type')
@@ -58,7 +64,9 @@ def generate_launch_description():
     name_leader = LaunchConfiguration('name_leader')
     name_others = LaunchConfiguration('name_others')
     use_rviz = LaunchConfiguration('use_rviz')
+    px4_mpc_setpoint = LaunchConfiguration('px4_mpc_setpoint')
     skip_build = LaunchConfiguration('skip_build')
+
 
     ld = LaunchDescription()
     ld.add_action(use_sim_time_arg)
@@ -68,6 +76,7 @@ def generate_launch_description():
     ld.add_action(name_leader_arg)
     ld.add_action(name_others_arg)
     ld.add_action(use_rviz_arg)
+    ld.add_action(px4_mpc_setpoint_arg)
     ld.add_action(skip_build_arg)
 
     # Launch MPC
@@ -84,6 +93,7 @@ def generate_launch_description():
             {'name_leader': name_leader},
             {'name_others': name_others},
             {'use_rviz': use_rviz},
+            {'px4_mpc_setpoint': px4_mpc_setpoint},
             {'skip_build': skip_build}
 
         ]

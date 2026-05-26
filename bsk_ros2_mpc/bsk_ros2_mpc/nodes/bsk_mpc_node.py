@@ -92,6 +92,7 @@ class BskMpc(Node):
         self.declare_parameter('name_leader', '')
         self.declare_parameter('name_others', '')
         self.declare_parameter('use_rviz', False)
+        self.declare_parameter('px4_mpc_setpoint', False)
         self.declare_parameter('skip_build', False)
 
         # use_sim_time is automatically declared by ROS2, just get its value
@@ -108,6 +109,8 @@ class BskMpc(Node):
         self.get_logger().info(f"Other agents' names: {self.name_others}")
         self.use_rviz = self.get_parameter('use_rviz').get_parameter_value().bool_value
         self.get_logger().info(f"Using RViz: {self.use_rviz}")
+        self.px4_mpc_setpoint = self.get_parameter('px4_mpc_setpoint').get_parameter_value().bool_value
+        self.get_logger().info(f"Using PX4 MPC setpoint: {self.px4_mpc_setpoint}")
         self.skip_build = self.get_parameter('skip_build').get_parameter_value().bool_value
         self.get_logger().info(f"Skip acados build: {self.skip_build}")
 
@@ -185,8 +188,15 @@ class BskMpc(Node):
                     lambda msg, n=name: self.others_sc_state_callback(msg, n),
                     qos_profile) for name in self.name_others
                 ]
-            
-        if self.use_rviz:
+
+        if self.px4_mpc_setpoint:
+            self.px4_setpoint_sub = self.create_subscription(
+                PoseStamped,
+                'px4_mpc/setpoint_pose',
+                self.setpoint_pose_callback,
+                0
+            )    
+        elif self.use_rviz:
             self.set_pose_srv = self.create_service(
                 SetPose,
                 'set_pose',
@@ -508,7 +518,7 @@ class BskMpc(Node):
         self.vehicle_angular_velocity_pub.publish(angular_velocity_msg)
 
     def publish_thruster_cmd(self, u):
-        Fthr = 1.5
+        Fthr = 1.3
         u = np.asarray(u).flatten()
 
         thr_array_msg = THRArrayCmdForceMsgPayload()

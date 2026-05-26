@@ -69,8 +69,8 @@ def bsk_model_wrench(n_others=0):
     model.u = u
 
     # limits
-    F_lim = 2 * 1.5 * 2/3
-    T_lim = 2 * 0.17 * 1.5 * 1/3
+    F_lim = 2 * 1.3 * 2/3
+    T_lim = 2 * 0.17 * 1.3 * 1/3
     model.u_min = np.array([-F_lim, -F_lim, -F_lim, -T_lim, -T_lim, -T_lim])
     model.u_max = np.array([F_lim, F_lim, F_lim, T_lim, T_lim, T_lim])
 

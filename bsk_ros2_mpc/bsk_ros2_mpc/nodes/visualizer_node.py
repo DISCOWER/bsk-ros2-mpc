@@ -83,9 +83,6 @@ class BskMpcVisualizer(Node):
         self.vehicle_pose_pub = self.create_publisher(
             PoseStamped, f"bsk_visualizer/vehicle_pose", 10
         )
-        self.vehicle_vel_pub = self.create_publisher(
-            Marker, f"bsk_visualizer/vehicle_velocity", 10
-        )
         self.vehicle_path_pub = self.create_publisher(
             Path, f"bsk_visualizer/vehicle_path", 10
         )
@@ -188,33 +185,6 @@ class BskMpcVisualizer(Node):
     def trajectory_setpoint_callback(self, msg):
         self.setpoint_position = msg.position
 
-    def create_arrow_marker(self, id, tail, vector):
-        msg = Marker()
-        msg.action = Marker.ADD
-        msg.header.frame_id = "map"
-        # msg.header.stamp = Clock().now().nanoseconds / 1000
-        msg.ns = "arrow"
-        msg.id = id
-        msg.type = Marker.ARROW
-        msg.scale.x = 0.1*0.3
-        msg.scale.y = 0.2*0.3
-        msg.scale.z = 0.0
-        msg.color.r = 0.5
-        msg.color.g = 0.5
-        msg.color.b = 0.0
-        msg.color.a = 1.0
-        dt = 0.3
-        tail_point = Point()
-        tail_point.x = tail[0]
-        tail_point.y = tail[1]
-        tail_point.z = tail[2]
-        head_point = Point()
-        head_point.x = tail[0] + dt * vector[0]
-        head_point.y = tail[1] + dt * vector[1]
-        head_point.z = tail[2] + dt * vector[2]
-        msg.points = [tail_point, head_point]
-        return msg
-
     def create_other_agent_sphere_marker(self, marker_id, position):
         msg = Marker()
         msg.action = Marker.ADD
@@ -271,10 +241,6 @@ class BskMpcVisualizer(Node):
         self.setpoint_path_msg.header = setpoint_pose_msg.header
         self.append_setpoint_path(setpoint_pose_msg)
         self.setpoint_path_pub.publish(self.setpoint_path_msg)
-
-        # Publish arrow markers for velocity
-        velocity_msg = self.create_arrow_marker(1, self.vehicle_local_position, self.vehicle_local_velocity)
-        self.vehicle_vel_pub.publish(velocity_msg)
 
         # Publish other agents as gray semi-transparent spheres (batched MarkerArray).
         self.other_agents_markers_pub.publish(self.create_other_agents_marker_array())

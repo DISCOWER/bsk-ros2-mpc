@@ -83,9 +83,6 @@ class BskMpcVisualizer(Node):
         self.vehicle_pose_pub = self.create_publisher(
             PoseStamped, f"bsk_visualizer/vehicle_pose", 10
         )
-        self.vehicle_vel_pub = self.create_publisher(
-            Marker, f"bsk_visualizer/vehicle_velocity", 10
-        )
         self.vehicle_path_pub = self.create_publisher(
             Path, f"bsk_visualizer/vehicle_path", 10
         )
@@ -98,7 +95,6 @@ class BskMpcVisualizer(Node):
 
         self.vehicle_attitude = np.array([1.0, 0.0, 0.0, 0.0])
         self.vehicle_local_position = np.array([0.0, 0.0, 0.0])
-        self.vehicle_local_velocity = np.array([0.0, 0.0, 0.0])
         self.setpoint_position = np.array([0.0, 0.0, 0.0])
         self.vehicle_path_msg = Path()
         self.setpoint_path_msg = Path()
@@ -143,22 +139,17 @@ class BskMpcVisualizer(Node):
         self.last_local_pos_update = Clock().now().nanoseconds / 1e9
 
         self.vehicle_local_position = msg.r_bn_n
-        self.vehicle_local_velocity = msg.v_bn_n
         q_nb = MRP2quat(np.array(msg.sigma_bn), ref_quat=self.setpoint_attitude)
         self.vehicle_attitude = q_nb
-        self.vehicle_angular_velocity = msg.omega_bn_b
     
     def hill_trans_callback(self, msg: HillRelStateMsgPayload):
-        # position and velocity in Hill frame
+        # position in Hill frame
         self.vehicle_local_position = msg.r_dc_h
-        self.vehicle_local_velocity = msg.v_dc_h            
 
     def hill_rot_callback(self, msg: AttGuidMsgPayload):
         # attitude in body to Hill frame
-        # angular velocity in body frame
         q_nb = MRP2quat(np.array(msg.sigma_br), ref_quat=self.setpoint_attitude)
         self.vehicle_attitude = q_nb
-        self.vehicle_angular_velocity = msg.omega_br_b
 
     def others_hill_trans_callback(self, msg: HillRelStateMsgPayload, name):
         self.other_agents_positions[name] = np.array(msg.r_dc_h)
@@ -271,10 +262,6 @@ class BskMpcVisualizer(Node):
         self.setpoint_path_msg.header = setpoint_pose_msg.header
         self.append_setpoint_path(setpoint_pose_msg)
         self.setpoint_path_pub.publish(self.setpoint_path_msg)
-
-        # Publish arrow markers for velocity
-        velocity_msg = self.create_arrow_marker(1, self.vehicle_local_position, self.vehicle_local_velocity)
-        self.vehicle_vel_pub.publish(velocity_msg)
 
         # Publish other agents as gray semi-transparent spheres (batched MarkerArray).
         self.other_agents_markers_pub.publish(self.create_other_agents_marker_array())

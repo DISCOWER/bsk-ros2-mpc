@@ -13,7 +13,7 @@ import tempfile
 def generate_launch_description():
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time',
-        default_value='False',
+        default_value='True',
         description='Use simulation time from /clock topic'
     )
     namespace_arg = DeclareLaunchArgument(
@@ -26,24 +26,9 @@ def generate_launch_description():
         default_value='wrench',
         description='Type of the controller (da, wrench, ...)'
     )
-    use_hill_arg = DeclareLaunchArgument(
-        'use_hill',
-        default_value='True',
-        description='Use Hill frame for MPC'
-    )
-    name_leader_arg = DeclareLaunchArgument(
-        'name_leader',
-        default_value='',
-        description='Namespace of the leader spacecraft'
-    )
-    name_others_arg = DeclareLaunchArgument(
-        'name_others',
-        default_value='',
-        description='Namespaces of other spacecraft, separated by spaces'
-    )
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz',
-        default_value='True',
+        default_value='False',
         description='Launch RViz visualizer'
     )
     skip_build_arg = DeclareLaunchArgument(
@@ -54,9 +39,6 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
     namespace = LaunchConfiguration('namespace')
     type = LaunchConfiguration('type')
-    use_hill = LaunchConfiguration('use_hill')
-    name_leader = LaunchConfiguration('name_leader')
-    name_others = LaunchConfiguration('name_others')
     use_rviz = LaunchConfiguration('use_rviz')
     skip_build = LaunchConfiguration('skip_build')
 
@@ -64,9 +46,6 @@ def generate_launch_description():
     ld.add_action(use_sim_time_arg)
     ld.add_action(namespace_arg)
     ld.add_action(type_arg)
-    ld.add_action(use_hill_arg)
-    ld.add_action(name_leader_arg)
-    ld.add_action(name_others_arg)
     ld.add_action(use_rviz_arg)
     ld.add_action(skip_build_arg)
 
@@ -80,9 +59,6 @@ def generate_launch_description():
         parameters=[
             {'use_sim_time': use_sim_time},
             {'type': type},
-            {'use_hill': use_hill},
-            {'name_leader': name_leader},
-            {'name_others': name_others},
             {'use_rviz': use_rviz},
             {'skip_build': skip_build}
 
@@ -106,10 +82,6 @@ def generate_launch_description():
         namespace=namespace,
         executable='visualizer',
         name='visualizer',
-        parameters=[
-            {'use_hill': use_hill},
-            {'name_others': name_others}
-        ],
         condition=IfCondition(use_rviz)
     ))
 

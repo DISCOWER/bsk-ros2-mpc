@@ -15,7 +15,7 @@ class MpcWrench():
         self.skip_build = skip_build
 
         # Define the controller parameters
-        self.dt = 0.2               # MPC time step [s]
+        self.dt = 0.1               # MPC time step [s]
         self.Nx = 30                # Prediction horizon, states             
         self.Q = np.diag([          # State weighting matrix
             1e0, 1e0, 1e0,

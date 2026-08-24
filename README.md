@@ -15,13 +15,17 @@ _Leader-follower formation flying with three spacecraft controlled via identical
 
 - [Basilisk-ROS 2 Messages](https://github.com/DISCOWER/bsk-msgs)
 - [acados](https://docs.acados.org/installation/)
+- casadi (`pip install casadi`)
 
 ### Install
 
 ```bash
 cd your_ros2_workspace/src
+git clone https://github.com/DISCOWER/bsk-msgs.git
 git clone https://github.com/DISCOWER/bsk-ros2-mpc.git
 cd ..
+rosdep update
+rosdep install --from-paths src --ignore-src -y
 colcon build --packages-up-to bsk-ros2-mpc
 source install/setup.bash
 ```

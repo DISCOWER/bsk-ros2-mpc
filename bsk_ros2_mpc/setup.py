@@ -19,7 +19,7 @@ setup(
     maintainer='Elias Krantz',
     maintainer_email='eliaskra@kth.se',
     description='Basilisk ROS2 controller package',
-    license='BSD-3',
+    license='BSD-3-Clause',
     extras_require={
         'test': ['pytest']
     },

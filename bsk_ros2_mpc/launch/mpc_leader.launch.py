@@ -57,7 +57,8 @@ def generate_launch_description():
         parameters=[
             {'use_sim_time': use_sim_time},
             {'type': type},
-            {'use_hill': use_hill}
+            {'use_hill': use_hill},
+            {'rviz_mode': 'off'}
         ]
     ))
 

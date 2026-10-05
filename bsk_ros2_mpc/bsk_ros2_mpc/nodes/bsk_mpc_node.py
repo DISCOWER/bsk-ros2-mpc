@@ -91,7 +91,7 @@ class BskMpc(Node):
         self.declare_parameter('use_hill', True)
         self.declare_parameter('name_leader', '')
         self.declare_parameter('name_others', '')
-        self.declare_parameter('use_rviz', False)
+        self.declare_parameter('rviz_mode', 'setpoint')
         self.declare_parameter('skip_build', False)
 
         # use_sim_time is automatically declared by ROS2, just get its value
@@ -106,8 +106,10 @@ class BskMpc(Node):
         self.name_others = self.name_others.split() if self.name_others else []
         self.n_others = len(self.name_others)
         self.get_logger().info(f"Other agents' names: {self.name_others}")
-        self.use_rviz = self.get_parameter('use_rviz').get_parameter_value().bool_value
-        self.get_logger().info(f"Using RViz: {self.use_rviz}")
+        self.rviz_mode = self.get_parameter('rviz_mode').get_parameter_value().string_value
+        if self.rviz_mode not in ('off', 'viz', 'setpoint'):
+            raise ValueError(f"Invalid rviz_mode: {self.rviz_mode} (expected off, viz or setpoint)")
+        self.get_logger().info(f"RViz mode: {self.rviz_mode}")
         self.skip_build = self.get_parameter('skip_build').get_parameter_value().bool_value
         self.get_logger().info(f"Skip acados build: {self.skip_build}")
 
@@ -185,8 +187,8 @@ class BskMpc(Node):
                     lambda msg, n=name: self.others_sc_state_callback(msg, n),
                     qos_profile) for name in self.name_others
                 ]
-            
-        if self.use_rviz:
+
+        if self.rviz_mode == 'setpoint':
             self.set_pose_srv = self.create_service(
                 SetPose,
                 'set_pose',

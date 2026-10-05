@@ -48,7 +48,7 @@ ros2 launch bsk-ros2-mpc mpc.launch.py
 | `use_sim_time` | `False` | Synchronize with `/clock` topic |
 | `type` | `wrench` | `wrench` (force/torque) or `da` (direct allocation) |
 | `use_hill` | `True` | Use Hill frame for MPC (when in orbit) |
-| `use_rviz` | `True` | Launch RViz for visualization and interactive control |
+| `rviz_mode` | `setpoint` | RViz mode: `setpoint`, `viz`, or `off` |
 | `name_leader` | `""` | Leader namespace (used by `follower_wrench`) |
 | `name_others` | `""` | Space-separated namespaces of other agents for collision avoidance |
 | `skip_build` | `False` | Skip acados solver codegen/build and reuse an existing compiled solver |
@@ -62,7 +62,7 @@ Notes:
 
 Single-agent
 ```bash
-ros2 launch bsk-ros2-mpc mpc.launch.py namespace:=bskSat0 type:=wrench use_hill:=True use_rviz:=True skip_build:=False
+ros2 launch bsk-ros2-mpc mpc.launch.py namespace:=bskSat0 type:=wrench use_hill:=True rviz_mode:=setpoint skip_build:=False
 ```
 
 Multi-agent avoidance example (track bskSat1 and bskSat2)

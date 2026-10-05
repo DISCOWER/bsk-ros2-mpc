@@ -35,7 +35,8 @@ def generate_launch_description():
         parameters=[
             {'type': 'follower_wrench'},
             {'use_hill': use_hill},
-            {'name_leader': 'leaderSc'}
+            {'name_leader': 'leaderSc'},
+            {'rviz_mode': 'off'}
         ]
     ))
     ld.add_action(Node(
@@ -49,7 +50,8 @@ def generate_launch_description():
             {'use_sim_time': use_sim_time},
             {'type': 'follower_wrench'},
             {'use_hill': use_hill},
-            {'name_leader': 'leaderSc'}
+            {'name_leader': 'leaderSc'},
+            {'rviz_mode': 'off'}
         ]
     ))
 

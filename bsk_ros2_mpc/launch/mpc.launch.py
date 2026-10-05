@@ -3,7 +3,8 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.actions import Node
 from launch.conditions import IfCondition
 from ament_index_python.packages import get_package_share_directory
@@ -41,10 +42,10 @@ def generate_launch_description():
         default_value='',
         description='Namespaces of other spacecraft, separated by spaces'
     )
-    use_rviz_arg = DeclareLaunchArgument(
-        'use_rviz',
-        default_value='True',
-        description='Launch RViz visualizer'
+    rviz_mode_arg = DeclareLaunchArgument(
+        'rviz_mode',
+        default_value='setpoint',
+        description='RViz mode: setpoint, viz or off'
     )
     skip_build_arg = DeclareLaunchArgument(
         'skip_build',
@@ -57,7 +58,7 @@ def generate_launch_description():
     use_hill = LaunchConfiguration('use_hill')
     name_leader = LaunchConfiguration('name_leader')
     name_others = LaunchConfiguration('name_others')
-    use_rviz = LaunchConfiguration('use_rviz')
+    rviz_mode = LaunchConfiguration('rviz_mode')
     skip_build = LaunchConfiguration('skip_build')
 
     ld = LaunchDescription()
@@ -67,7 +68,7 @@ def generate_launch_description():
     ld.add_action(use_hill_arg)
     ld.add_action(name_leader_arg)
     ld.add_action(name_others_arg)
-    ld.add_action(use_rviz_arg)
+    ld.add_action(rviz_mode_arg)
     ld.add_action(skip_build_arg)
 
     # Launch MPC
@@ -83,7 +84,7 @@ def generate_launch_description():
             {'use_hill': use_hill},
             {'name_leader': name_leader},
             {'name_others': name_others},
-            {'use_rviz': use_rviz},
+            {'rviz_mode': ParameterValue(rviz_mode, value_type=str)},
             {'skip_build': skip_build}
 
         ]
@@ -97,7 +98,7 @@ def generate_launch_description():
         name='rviz_pose_marker',
         output='screen',
         emulate_tty=True,
-        condition=IfCondition(use_rviz)
+        condition=IfCondition(PythonExpression(["'", rviz_mode, "' == 'setpoint'"]))
     ))
 
     # Launch visualizer
@@ -110,7 +111,7 @@ def generate_launch_description():
             {'use_hill': use_hill},
             {'name_others': name_others}
         ],
-        condition=IfCondition(use_rviz)
+        condition=IfCondition(PythonExpression(["'", rviz_mode, "' != 'off'"]))
     ))
 
     ld.add_action(OpaqueFunction(function=launch_setup))
@@ -150,6 +151,6 @@ def launch_setup(context, *args, **kwargs):
             executable='rviz2',
             name='rviz2',
             arguments=['-d', patched_config],
-            condition=IfCondition(LaunchConfiguration('use_rviz'))
+            condition=IfCondition(PythonExpression(["'", LaunchConfiguration('rviz_mode'), "' != 'off'"]))
         )
     ]

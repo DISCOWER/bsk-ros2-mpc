@@ -20,7 +20,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetPose.srv"
   DEPENDENCIES geometry_msgs
- )
+)
 # ament_target_dependencies(${PROJECT_NAME} geometry_msgs)
 rosidl_get_typesupport_target(cpp_typesupport_target "${PROJECT_NAME}" "rosidl_typesupport_cpp")
 

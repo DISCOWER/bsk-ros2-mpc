@@ -411,12 +411,15 @@ class BskMpc(Node):
             request.pose.orientation.z
         ])
         norm = np.linalg.norm(new_attitude)
-        if norm > 0:
-            new_attitude /= norm
+        if not np.isfinite(norm) or norm == 0:
+            response.result = False
+            return response
+        new_attitude /= norm
         if np.dot(self.vehicle_attitude, new_attitude) < 0:
             self.setpoint_attitude = -new_attitude
         else:
             self.setpoint_attitude = new_attitude
+        response.result = True
         return response
 
     def setpoint_pose_callback(self, msg):

@@ -10,7 +10,6 @@ from bsk_msgs.msg import HillRelStateMsgPayload, AttGuidMsgPayload, SCStatesMsgP
 from geometry_msgs.msg import PoseStamped, Point
 from nav_msgs.msg import Path
 from visualization_msgs.msg import Marker, MarkerArray
-from bsk_mpc_msgs.srv import SetPose
 
 class BskMpcVisualizer(Node):
     def __init__(self):
@@ -73,12 +72,6 @@ class BskMpcVisualizer(Node):
                 )
                 for name in self.name_others
             ]
-        self.setpoint_pose_srv = self.create_service(
-            SetPose,
-            'set_pose',
-            self.add_setpoint_pose_callback
-        )
-
         # Publishers
         self.vehicle_pose_pub = self.create_publisher(
             PoseStamped, f"bsk_visualizer/vehicle_pose", 10
@@ -98,7 +91,6 @@ class BskMpcVisualizer(Node):
         self.setpoint_position = np.array([0.0, 0.0, 0.0])
         self.vehicle_path_msg = Path()
         self.setpoint_path_msg = Path()
-        self.setpoint_attitude = np.array([1.0, 0.0, 0.0, 0.0])
 
         # trail size
         self.trail_size = 1000
@@ -139,7 +131,7 @@ class BskMpcVisualizer(Node):
         self.last_local_pos_update = Clock().now().nanoseconds / 1e9
 
         self.vehicle_local_position = msg.r_bn_n
-        q_nb = MRP2quat(np.array(msg.sigma_bn), ref_quat=self.setpoint_attitude)
+        q_nb = MRP2quat(np.array(msg.sigma_bn), ref_quat=self.vehicle_attitude)
         self.vehicle_attitude = q_nb
     
     def hill_trans_callback(self, msg: HillRelStateMsgPayload):
@@ -148,7 +140,7 @@ class BskMpcVisualizer(Node):
 
     def hill_rot_callback(self, msg: AttGuidMsgPayload):
         # attitude in body to Hill frame
-        q_nb = MRP2quat(np.array(msg.sigma_br), ref_quat=self.setpoint_attitude)
+        q_nb = MRP2quat(np.array(msg.sigma_br), ref_quat=self.vehicle_attitude)
         self.vehicle_attitude = q_nb
 
     def others_hill_trans_callback(self, msg: HillRelStateMsgPayload, name):
@@ -158,23 +150,6 @@ class BskMpcVisualizer(Node):
     def others_sc_state_callback(self, msg: SCStatesMsgPayload, name):
         self.other_agents_positions[name] = np.array(msg.r_bn_n)
         self.other_agents_seen[name] = True
-
-    def add_setpoint_pose_callback(self, request, response):
-        # Extract and normalize quaternion
-        new_attitude = np.array([
-            request.pose.orientation.w,
-            request.pose.orientation.x,
-            request.pose.orientation.y,
-            request.pose.orientation.z
-        ])
-        norm = np.linalg.norm(new_attitude)
-        if norm > 0:
-            new_attitude /= norm
-        if np.dot(self.vehicle_attitude, new_attitude) < 0:
-            self.setpoint_attitude = -new_attitude
-        else:
-            self.setpoint_attitude = new_attitude
-        return response
 
     def trajectory_setpoint_callback(self, msg):
         self.setpoint_position = msg.position

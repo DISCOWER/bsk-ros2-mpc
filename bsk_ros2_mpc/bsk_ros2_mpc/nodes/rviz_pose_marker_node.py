@@ -13,7 +13,7 @@
 #     * Redistributions in binary form must reproduce the above copyright
 #       notice, this list of conditions and the following disclaimer in the
 #       documentation and/or other materials provided with the distribution.
-#     * Neither the name of the Willow Garage, Inc. nor the names of its
+#     * Neither the name of Willow Garage, Inc. nor the names of its
 #       contributors may be used to endorse or promote products derived from
 #       this software without specific prior written permission.
 #
@@ -29,13 +29,12 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, Pose
 from interactive_markers import InteractiveMarkerServer, MenuHandler
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from visualization_msgs.msg import InteractiveMarker, InteractiveMarkerControl, InteractiveMarkerFeedback, Marker
-
 from bsk_mpc_msgs.srv import SetPose
 
 def makeBox(msg):
@@ -76,7 +75,8 @@ def make6DofMarker(server, menu_handler, process_feedback, fixed, interaction_mo
     int_marker = InteractiveMarker()
     int_marker.header.frame_id = 'map'
     int_marker.pose.position = position
-    int_marker.scale = 0.36
+    int_marker.pose.orientation.w = 1.0
+    int_marker.scale = 0.72
 
     int_marker.name = 'simple_6dof'
 
@@ -130,14 +130,32 @@ class RvizPoseMarker(Node):
     def __init__(self):
         super().__init__('rviz_target_pose_marker')
 
-        self.set_pose_client = self.create_client(SetPose, 'set_pose')
+        self.declare_parameter('agents', '')
+        agents = self.get_parameter('agents').get_parameter_value().string_value
+        self.agents = agents.split() if agents else []
+
+        if self.agents:
+            self.set_pose_clients = {
+                agent: self.create_client(SetPose, f'/{agent}/set_pose')
+                for agent in self.agents
+            }
+        else:
+            self.set_pose_clients = {'': self.create_client(SetPose, 'set_pose')}
+
         self.menu_handler = MenuHandler()
         self.server = InteractiveMarkerServer(self, 'rviz_target_pose_marker')
 
-        self.menu_handler.insert('Command Pose', callback=self.command_pose_callback)
-        self.menu_handler.insert('Reset')
+        if self.agents:
+            for agent in self.agents:
+                self.menu_handler.insert(
+                    f'Set setpoint for {agent}',
+                    callback=self._make_command_pose_callback(agent),
+                )
+        else:
+            self.menu_handler.insert('Command Pose', callback=self.command_pose_callback)
+        self.menu_handler.insert('Reset', callback=self.reset_marker_callback)
 
-        position = Point(x=1.0, y=1.0, z=0.0)
+        position = Point(x=0.0, y=0.0, z=0.0)
         make6DofMarker(self.server, self.menu_handler, self.process_feedback, True, InteractiveMarkerControl.NONE, position, True)
         self.server.applyChanges()
 
@@ -160,23 +178,38 @@ class RvizPoseMarker(Node):
         elif feedback.event_type == InteractiveMarkerFeedback.MOUSE_UP:
             self.get_logger().debug(f'{log_prefix}: mouse up at {log_mouse}')
 
-    def command_pose_callback(self, feedback):
-        if not self.set_pose_client.service_is_ready():
-            self.get_logger().warn("Service 'set_pose' not available, is the MPC running?")
+    def _make_command_pose_callback(self, agent):
+        def command_pose_callback(feedback):
+            self.command_pose_callback(feedback, agent)
+        return command_pose_callback
+
+    def command_pose_callback(self, feedback, agent=''):
+        set_pose_client = self.set_pose_clients[agent]
+        service_name = f'/{agent}/set_pose' if agent else 'set_pose'
+        if not set_pose_client.service_is_ready():
+            self.get_logger().warn(f"Service '{service_name}' not available, is the MPC running?")
             return
 
         request = SetPose.Request()
         request.pose = feedback.pose
-        future = self.set_pose_client.call_async(request)
+        future = set_pose_client.call_async(request)
         future.add_done_callback(self.command_pose_response_callback)
 
         position = feedback.pose.position
         orientation = feedback.pose.orientation
         self.get_logger().info(
-            f'Commanded pose: position=({position.x:.2f}, {position.y:.2f}, {position.z:.2f}), '
+            f'Commanded pose for {agent or "the current namespace"}: '
+            f'position=({position.x:.2f}, {position.y:.2f}, {position.z:.2f}), '
             f'attitude=({orientation.w:.3f}, {orientation.x:.3f}, '
             f'{orientation.y:.3f}, {orientation.z:.3f})'
         )
+
+    def reset_marker_callback(self, feedback):
+        pose = Pose()
+        pose.orientation.w = 1.0
+        self.server.setPose(feedback.marker_name, pose)
+        self.server.applyChanges()
+        self.get_logger().info('Reset interactive marker to the origin')
 
     def command_pose_response_callback(self, future):
         try:

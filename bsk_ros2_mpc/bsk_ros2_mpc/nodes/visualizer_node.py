@@ -3,7 +3,6 @@ import numpy as np
 from ..tools.utils import MRP2quat
 import rclpy
 from rclpy.node import Node
-from rclpy.clock import Clock
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 
 from bsk_msgs.msg import HillRelStateMsgPayload, AttGuidMsgPayload, SCStatesMsgPayload
@@ -18,13 +17,24 @@ class BskMpcVisualizer(Node):
         self.declare_parameter('use_hill', True)
         self.use_hill = self.get_parameter('use_hill').get_parameter_value().bool_value
         self.get_logger().info(f"Use Hill frame: {self.use_hill}")
-        self.declare_parameter('name_others', '')
-        self.name_others = self.get_parameter('name_others').get_parameter_value().string_value
-        self.name_others = self.name_others.split() if self.name_others else []
-        self.get_logger().info(f"Other agents' names: {self.name_others}")
-        self.other_agents_positions = {name: np.zeros(3) for name in self.name_others}
-        self.other_agents_seen = {name: False for name in self.name_others}
-
+        self.declare_parameter('agents', '')
+        agents = self.get_parameter('agents').get_parameter_value().string_value
+        self.agents = agents.split() if agents else []
+        self.agent_states = {
+            name: {
+                'position': np.zeros(3),
+                'attitude': np.array([1.0, 0.0, 0.0, 0.0]),
+                'seen': False,
+                'vehicle_path': Path(),
+                'setpoint_path': Path(),
+                'predicted_path': Path(),
+                'setpoint_pose': PoseStamped(),
+                'setpoint_seen': False,
+                'last_update': 0.0,
+                'labels_dirty': True,
+            }
+            for name in self.agents
+        }
         # QoS profile
         qos_profile = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -33,67 +43,88 @@ class BskMpcVisualizer(Node):
             depth=1
         )
 
-        # Subscribers
-        if self.use_hill:
-            self.hill_trans_sub = self.create_subscription(
-                HillRelStateMsgPayload,
-                "bsk/out/hill_trans_state",
-                self.hill_trans_callback,
-                qos_profile
-            )
-            self.hill_rot_sub = self.create_subscription(
-                AttGuidMsgPayload,
-                "bsk/out/hill_rot_state",
-                self.hill_rot_callback,
-                qos_profile
-            )
-            self.others_hill_trans_sub = [
-                self.create_subscription(
-                    HillRelStateMsgPayload,
-                    f'/{name}/bsk/out/hill_trans_state',
-                    lambda msg, n=name: self.others_hill_trans_callback(msg, n),
-                    qos_profile,
+        self.state_subscriptions = []
+        for name in self.agents:
+            if self.use_hill:
+                self.state_subscriptions.extend([
+                    self.create_subscription(
+                        HillRelStateMsgPayload,
+                        f'/{name}/bsk/out/hill_trans_state',
+                        lambda msg, n=name: self.hill_trans_callback(msg, n),
+                        qos_profile,
+                    ),
+                    self.create_subscription(
+                        AttGuidMsgPayload,
+                        f'/{name}/bsk/out/hill_rot_state',
+                        lambda msg, n=name: self.hill_rot_callback(msg, n),
+                        qos_profile,
+                    ),
+                ])
+            else:
+                self.state_subscriptions.append(
+                    self.create_subscription(
+                        SCStatesMsgPayload,
+                        f'/{name}/bsk/out/sc_states',
+                        lambda msg, n=name: self.sc_state_callback(msg, n),
+                        qos_profile,
+                    )
                 )
-                for name in self.name_others
-            ]
-        else:
-            self.sc_state_sub = self.create_subscription(
-                SCStatesMsgPayload, 
-                "bsk/out/sc_states", 
-                self.sc_state_callback, 
-                qos_profile
-            )
-            self.others_sc_state_sub = [
-                self.create_subscription(
-                    SCStatesMsgPayload,
-                    f'/{name}/bsk/out/sc_states',
-                    lambda msg, n=name: self.others_sc_state_callback(msg, n),
-                    qos_profile,
-                )
-                for name in self.name_others
-            ]
-        # Publishers
-        self.vehicle_pose_pub = self.create_publisher(
-            PoseStamped, f"bsk_visualizer/vehicle_pose", 10
-        )
-        self.vehicle_path_pub = self.create_publisher(
-            Path, f"bsk_visualizer/vehicle_path", 10
-        )
-        self.setpoint_path_pub = self.create_publisher(
-            Path, f"bsk_visualizer/setpoint_path", 10
-        )
-        self.other_agents_markers_pub = self.create_publisher(
-            MarkerArray, f"bsk_visualizer/other_agents_markers_array", 10
-        )
 
-        self.vehicle_attitude = np.array([1.0, 0.0, 0.0, 0.0])
-        self.vehicle_local_position = np.array([0.0, 0.0, 0.0])
-        self.setpoint_position = np.array([0.0, 0.0, 0.0])
-        self.vehicle_path_msg = Path()
-        self.setpoint_path_msg = Path()
+        self.setpoint_subscriptions = [
+            self.create_subscription(
+                PoseStamped,
+                f'/{name}/bsk_mpc/vehicle_pose_ref',
+                lambda msg, n=name: self.setpoint_pose_callback(msg, n),
+                10,
+            )
+            for name in self.agents
+        ]
+        self.predicted_subscriptions = [
+            self.create_subscription(
+                Path,
+                f'/{name}/bsk_mpc/predicted_path',
+                lambda msg, n=name: self.predicted_path_callback(msg, n),
+                10,
+            )
+            for name in self.agents
+        ]
+
+        self.pose_pubs = {
+            name: self.create_publisher(PoseStamped, f'bsk_visualizer/{name}/pose', 10)
+            for name in self.agents
+        }
+        self.setpoint_pose_pubs = {
+            name: self.create_publisher(PoseStamped, f'bsk_visualizer/{name}/setpoint_pose', 10)
+            for name in self.agents
+        }
+        label_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self.labels_pub = self.create_publisher(MarkerArray, 'bsk_visualizer/labels', label_qos)
+        self.radius_pubs = {
+            name: self.create_publisher(Marker, f'bsk_visualizer/{name}/radii', 10)
+            for name in self.agents
+        }
+        self.vehicle_path_pubs = {
+            name: self.create_publisher(Path, f'bsk_visualizer/{name}/vehicle_path', 10)
+            for name in self.agents
+        }
+        self.setpoint_path_pubs = {
+            name: self.create_publisher(Path, f'bsk_visualizer/{name}/setpoint_path', 10)
+            for name in self.agents
+        }
+        self.predicted_path_pubs = {
+            name: self.create_publisher(Path, f'bsk_visualizer/{name}/predicted_path', 10)
+            for name in self.agents
+        }
 
         # trail size
         self.trail_size = 1000
+        self.labels_publish_period = 0.2
+        self.last_labels_publish = None
 
         # time stamp for the last local position update received on ROS2 topic
         self.last_local_pos_update = 0.0
@@ -117,137 +148,179 @@ class BskMpcVisualizer(Node):
         pose_msg.pose.position.z = position[2]
         return pose_msg
 
-    def sc_state_callback(self, msg):
-        path_clearing_timeout = (
-            self.get_parameter("path_clearing_timeout")
-            .get_parameter_value()
-            .double_value
+    def update_agent_state(self, name):
+        state = self.agent_states[name]
+        now = self.get_clock().now().nanoseconds / 1e9
+        timeout = self.get_parameter('path_clearing_timeout').get_parameter_value().double_value
+        if timeout >= 0 and state['last_update'] > 0 and now - state['last_update'] > timeout:
+            state['vehicle_path'].poses.clear()
+        state['last_update'] = now
+        state['seen'] = True
+        state['labels_dirty'] = True
+
+    def sc_state_callback(self, msg, name):
+        state = self.agent_states[name]
+        state['position'] = np.array(msg.r_bn_n)
+        state['attitude'] = MRP2quat(
+            np.array(msg.sigma_bn),
+            ref_quat=state['attitude'],
         )
-        if path_clearing_timeout >= 0 and (
-            (self.get_clock().now() / 1e9 - self.last_local_pos_update)
-            > path_clearing_timeout
-        ):
-            self.vehicle_path_msg.poses.clear()
-        self.last_local_pos_update = Clock().now().nanoseconds / 1e9
+        self.update_agent_state(name)
 
-        self.vehicle_local_position = msg.r_bn_n
-        q_nb = MRP2quat(np.array(msg.sigma_bn), ref_quat=self.vehicle_attitude)
-        self.vehicle_attitude = q_nb
-    
-    def hill_trans_callback(self, msg: HillRelStateMsgPayload):
-        # position in Hill frame
-        self.vehicle_local_position = msg.r_dc_h
+    def hill_trans_callback(self, msg, name):
+        self.agent_states[name]['position'] = np.array(msg.r_dc_h)
+        self.update_agent_state(name)
 
-    def hill_rot_callback(self, msg: AttGuidMsgPayload):
-        # attitude in body to Hill frame
-        q_nb = MRP2quat(np.array(msg.sigma_br), ref_quat=self.vehicle_attitude)
-        self.vehicle_attitude = q_nb
+    def hill_rot_callback(self, msg, name):
+        state = self.agent_states[name]
+        state['attitude'] = MRP2quat(
+            np.array(msg.sigma_br),
+            ref_quat=state['attitude'],
+        )
+        self.update_agent_state(name)
 
-    def others_hill_trans_callback(self, msg: HillRelStateMsgPayload, name):
-        self.other_agents_positions[name] = np.array(msg.r_dc_h)
-        self.other_agents_seen[name] = True
+    def setpoint_pose_callback(self, msg, name):
+        self.agent_states[name]['setpoint_pose'] = msg
+        self.agent_states[name]['setpoint_seen'] = True
+        self.agent_states[name]['labels_dirty'] = True
 
-    def others_sc_state_callback(self, msg: SCStatesMsgPayload, name):
-        self.other_agents_positions[name] = np.array(msg.r_bn_n)
-        self.other_agents_seen[name] = True
+    def predicted_path_callback(self, msg, name):
+        self.agent_states[name]['predicted_path'] = msg
+        self.predicted_path_pubs[name].publish(msg)
 
-    def trajectory_setpoint_callback(self, msg):
-        self.setpoint_position = msg.position
+    def create_collision_radius_marker(self, state):
+        marker = Marker()
+        marker.header.frame_id = "map"
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "collision_radius"
+        marker.id = 0
+        marker.type = Marker.SPHERE
+        marker.action = Marker.ADD
+        marker.scale.x = 0.6
+        marker.scale.y = 0.6
+        marker.scale.z = 0.6
+        marker.color.r = 0.5
+        marker.color.g = 0.5
+        marker.color.b = 0.5
+        marker.color.a = 0.5
+        marker.pose.orientation.w = 1.0
+        marker.pose.position.x = float(state['position'][0])
+        marker.pose.position.y = float(state['position'][1])
+        marker.pose.position.z = float(state['position'][2])
+        return marker
 
-    def create_arrow_marker(self, id, tail, vector):
-        msg = Marker()
-        msg.action = Marker.ADD
-        msg.header.frame_id = "map"
-        # msg.header.stamp = Clock().now().nanoseconds / 1000
-        msg.ns = "arrow"
-        msg.id = id
-        msg.type = Marker.ARROW
-        msg.scale.x = 0.1*0.3
-        msg.scale.y = 0.2*0.3
-        msg.scale.z = 0.0
-        msg.color.r = 0.5
-        msg.color.g = 0.5
-        msg.color.b = 0.0
-        msg.color.a = 1.0
-        dt = 0.3
-        tail_point = Point()
-        tail_point.x = tail[0]
-        tail_point.y = tail[1]
-        tail_point.z = tail[2]
-        head_point = Point()
-        head_point.x = tail[0] + dt * vector[0]
-        head_point.y = tail[1] + dt * vector[1]
-        head_point.z = tail[2] + dt * vector[2]
-        msg.points = [tail_point, head_point]
-        return msg
+    def create_label_marker(self, position, text, color, marker_id, action=Marker.ADD):
+        marker = Marker()
+        marker.header.frame_id = 'map'
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = 'labels'
+        marker.id = marker_id
+        marker.type = Marker.TEXT_VIEW_FACING
+        marker.action = action
+        marker.pose.position.x = float(position[0])
+        marker.pose.position.y = float(position[1])
+        marker.pose.position.z = float(position[2]) + 0.45
+        marker.pose.orientation.w = 1.0
+        marker.scale.z = 0.13
+        marker.color.r = color[0]
+        marker.color.g = color[1]
+        marker.color.b = color[2]
+        marker.color.a = 1.0
+        marker.text = text
+        return marker
 
-    def create_other_agent_sphere_marker(self, marker_id, position):
-        msg = Marker()
-        msg.action = Marker.ADD
-        msg.header.frame_id = "map"
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.ns = "other_agents"
-        msg.id = marker_id
-        msg.type = Marker.SPHERE
-        msg.scale.x = 0.6
-        msg.scale.y = 0.6
-        msg.scale.z = 0.6
-        msg.color.r = 0.5
-        msg.color.g = 0.5
-        msg.color.b = 0.5
-        msg.color.a = 0.5
-        msg.pose.orientation.w = 1.0
-        msg.pose.position.x = float(position[0])
-        msg.pose.position.y = float(position[1])
-        msg.pose.position.z = float(position[2])
-        return msg
-
-    def create_other_agents_marker_array(self):
-        msg = MarkerArray()
-        for idx, name in enumerate(self.name_others):
-            if not self.other_agents_seen[name]:
-                continue
-            pos = self.other_agents_positions[name]
-            msg.markers.append(self.create_other_agent_sphere_marker(idx, pos))
-        return msg
-
-    def append_vehicle_path(self, msg):
-        self.vehicle_path_msg.poses.append(msg)
-        if len(self.vehicle_path_msg.poses) > self.trail_size:
-            del self.vehicle_path_msg.poses[0]
-
-    def append_setpoint_path(self, msg):
-        self.setpoint_path_msg.poses.append(msg)
-        if len(self.setpoint_path_msg.poses) > self.trail_size:
-            del self.setpoint_path_msg.poses[0]
+    def publish_labels(self):
+        labels = MarkerArray()
+        for index, (name, state) in enumerate(self.agent_states.items()):
+            pose_marker_id = 2 * index
+            setpoint_marker_id = pose_marker_id + 1
+            if state['seen']:
+                labels.markers.append(
+                    self.create_label_marker(
+                        state['position'],
+                        f'{name}_pose',
+                        (1.0, 0.1, 0.0),
+                        pose_marker_id,
+                    )
+                )
+            else:
+                labels.markers.append(
+                    self.create_label_marker(
+                        (0.0, 0.0, 0.0),
+                        '',
+                        (0.0, 0.0, 0.0),
+                        pose_marker_id,
+                        Marker.DELETE,
+                    )
+                )
+            if state['setpoint_seen']:
+                setpoint = state['setpoint_pose'].pose.position
+                labels.markers.append(
+                    self.create_label_marker(
+                        (setpoint.x, setpoint.y, setpoint.z + 0.3),
+                        f'{name}_setpoint',
+                        (0.0, 0.0, 1.0),
+                        setpoint_marker_id,
+                    )
+                )
+            else:
+                labels.markers.append(
+                    self.create_label_marker(
+                        (0.0, 0.0, 0.0),
+                        '',
+                        (0.0, 0.0, 0.0),
+                        setpoint_marker_id,
+                        Marker.DELETE,
+                    )
+                )
+        self.labels_pub.publish(labels)
+        for state in self.agent_states.values():
+            state['labels_dirty'] = False
 
     def cmdloop_callback(self):
-        vehicle_pose_msg = self.vector2PoseMsg(
-            "map", self.vehicle_local_position, self.vehicle_attitude
+        for name, state in self.agent_states.items():
+            if not state['seen']:
+                continue
+
+            pose_msg = self.vector2PoseMsg(
+                "map", state['position'], state['attitude']
+            )
+            self.pose_pubs[name].publish(pose_msg)
+            self.radius_pubs[name].publish(self.create_collision_radius_marker(state))
+
+            vehicle_path = state['vehicle_path']
+            vehicle_path.header = pose_msg.header
+            vehicle_path.poses.append(pose_msg)
+            if len(vehicle_path.poses) > self.trail_size:
+                del vehicle_path.poses[0]
+            self.vehicle_path_pubs[name].publish(vehicle_path)
+
+            if state['setpoint_seen']:
+                setpoint_pose = state['setpoint_pose']
+                self.setpoint_pose_pubs[name].publish(setpoint_pose)
+            else:
+                setpoint_pose = pose_msg
+            setpoint_path = state['setpoint_path']
+            setpoint_path.header = setpoint_pose.header
+            setpoint_path.poses.append(setpoint_pose)
+            if len(setpoint_path.poses) > self.trail_size:
+                del setpoint_path.poses[0]
+            self.setpoint_path_pubs[name].publish(setpoint_path)
+
+        labels_dirty = any(state['labels_dirty'] for state in self.agent_states.values())
+        now = self.get_clock().now().nanoseconds / 1e9
+        labels_due = (
+            self.last_labels_publish is None
+            or now - self.last_labels_publish >= self.labels_publish_period
         )
-        self.vehicle_pose_pub.publish(vehicle_pose_msg)
-
-        # Publish time history of the vehicle path
-        self.vehicle_path_msg.header = vehicle_pose_msg.header
-        self.append_vehicle_path(vehicle_pose_msg)
-        self.vehicle_path_pub.publish(self.vehicle_path_msg)
-
-        # Publish time history of the vehicle path
-        setpoint_pose_msg = self.vector2PoseMsg("odom", self.vehicle_local_position, self.vehicle_attitude)
-        self.setpoint_path_msg.header = setpoint_pose_msg.header
-        self.append_setpoint_path(setpoint_pose_msg)
-        self.setpoint_path_pub.publish(self.setpoint_path_msg)
-
-        # Publish other agents as gray semi-transparent spheres (batched MarkerArray).
-        self.other_agents_markers_pub.publish(self.create_other_agents_marker_array())
+        if labels_dirty and labels_due:
+            self.publish_labels()
+            self.last_labels_publish = now
 
 def main(args=None):
     rclpy.init(args=args)
-
     bsk_mpc_visualizer = BskMpcVisualizer()
-
     rclpy.spin(bsk_mpc_visualizer)
-
     bsk_mpc_visualizer.destroy_node()
     rclpy.shutdown()
 

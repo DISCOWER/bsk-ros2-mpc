@@ -54,7 +54,7 @@ class MpcDa():
         # Set directory for code generation and json file
         this_file_dir = os.path.dirname(os.path.abspath(__file__))
         package_root = os.path.abspath(os.path.join(this_file_dir, '..'))
-        codegen_dir = os.path.join(package_root, 'mpc_codegen')
+        codegen_dir = os.path.join(package_root, 'codegen_da')
         json_path = os.path.join(codegen_dir, 'acados_ocp.json')
         os.makedirs(codegen_dir, exist_ok=True)
         ocp.code_export_directory = codegen_dir

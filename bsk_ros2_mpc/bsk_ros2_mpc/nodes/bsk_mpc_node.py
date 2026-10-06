@@ -36,6 +36,8 @@ class BskMpc(Node):
         self.setpoint_velocity = np.array([0.0, 0.0, 0.0])
         self.setpoint_attitude = np.array([1.0, 0.0, 0.0, 0.0])
         self.setpoint_angular_velocity = np.array([0.0, 0.0, 0.0])
+        self.initial_setpoint_position_received = False
+        self.initial_setpoint_attitude_received = False
 
         # Create Spacecraft and controller objects
         if self.type == 'da':
@@ -50,6 +52,8 @@ class BskMpc(Node):
             from bsk_ros2_mpc.controllers.mpc_follower_wrench import MpcFollowerWrench
             self.mpc = MpcFollowerWrench(1) # Assuming 1 other agent (the leader)
             self.control = np.zeros((self.mpc.nu, 1))
+
+        self.get_logger().info("MPC controller ready")
 
         # Initialize others' state and predicted path
         self.leader = {
@@ -302,12 +306,21 @@ class BskMpc(Node):
         q_nb = MRP2quat(np.array(msg.sigma_bn), ref_quat=self.setpoint_attitude)
         self.vehicle_attitude = q_nb
         self.vehicle_angular_velocity = msg.omega_bn_b
+        if not self.initial_setpoint_position_received:
+            self.setpoint_position = np.array(msg.r_bn_n, dtype=float).copy()
+            self.initial_setpoint_position_received = True
+        if not self.initial_setpoint_attitude_received:
+            self.setpoint_attitude = q_nb.copy()
+            self.initial_setpoint_attitude_received = True
     
     def hill_trans_callback(self, msg: HillRelStateMsgPayload):
         # position and velocity in Hill frame
         self.vehicle_state_timestamp = msg.stamp.sec * 1_000_000_000 + msg.stamp.nanosec
         self.vehicle_local_position = msg.r_dc_h
         self.vehicle_local_velocity = msg.v_dc_h            
+        if not self.initial_setpoint_position_received:
+            self.setpoint_position = np.array(msg.r_dc_h, dtype=float).copy()
+            self.initial_setpoint_position_received = True
 
     def hill_rot_callback(self, msg: AttGuidMsgPayload):
         # attitude in body to Hill frame
@@ -315,6 +328,9 @@ class BskMpc(Node):
         q_nb = MRP2quat(np.array(msg.sigma_br), ref_quat=self.setpoint_attitude)
         self.vehicle_attitude = q_nb
         self.vehicle_angular_velocity = msg.omega_br_b
+        if not self.initial_setpoint_attitude_received:
+            self.setpoint_attitude = q_nb.copy()
+            self.initial_setpoint_attitude_received = True
 
     def leader_state_callback(self, msg: SCStatesMsgPayload):
         # Update leader spacecraft state

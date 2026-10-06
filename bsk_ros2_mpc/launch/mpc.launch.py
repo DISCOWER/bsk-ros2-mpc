@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 ''' Launch the MPC node '''
 
+import os, re, tempfile
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PythonExpression
@@ -8,10 +9,9 @@ from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.actions import Node
 from launch.conditions import IfCondition
 from ament_index_python.packages import get_package_share_directory
-import os
-import tempfile
 
 def generate_launch_description():
+    # Declare launch-time configuration.
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time',
         default_value='False',
@@ -71,7 +71,7 @@ def generate_launch_description():
     ld.add_action(rviz_mode_arg)
     ld.add_action(skip_build_arg)
 
-    # Launch MPC
+    # Launch the MPC node.
     ld.add_action(Node(
         package='bsk-ros2-mpc',
         namespace=namespace,
@@ -90,7 +90,7 @@ def generate_launch_description():
         ]
     ))
 
-    # Launch RViz pose marker
+    # Launch the interactive setpoint marker.
     ld.add_action(Node(
         package='bsk-ros2-mpc',
         namespace=namespace,
@@ -101,32 +101,40 @@ def generate_launch_description():
         condition=IfCondition(PythonExpression(["'", rviz_mode, "' == 'setpoint'"]))
     ))
 
-    # Launch visualizer
-    ld.add_action(Node(
-        package='bsk-ros2-mpc',
-        namespace=namespace,
-        executable='visualizer',
-        name='visualizer',
-        parameters=[
-            {'use_hill': use_hill},
-            {'name_others': name_others}
-        ],
-        condition=IfCondition(PythonExpression(["'", rviz_mode, "' != 'off'"]))
-    ))
-
     ld.add_action(OpaqueFunction(function=launch_setup))
 
     return ld
 
-def patch_rviz_config(original_config_path, namespace):
+def patch_rviz_config(original_config_path, agents, marker_namespace, setpoint_agents=None):
+    # Expand the RViz template for the configured agents.
     """
     Patch the RViz configuration file to replace the namespace placeholder with the actual namespace.
     """
     with open(original_config_path, 'r') as f:
         content = f.read()
 
-    # Replace placeholder with actual namespace
-    content = content.replace('__NS__', f'/{namespace}' if namespace else '')
+    displays_marker = '  Displays:\n'
+    enabled_marker = '  Enabled: true\n  Global Options:'
+    displays_start = content.index(displays_marker) + len(displays_marker)
+    enabled_start = content.index(enabled_marker, displays_start)
+    display_blocks = re.split(r'(?=    - )', content[displays_start:enabled_start])
+    setpoint_agents = agents if setpoint_agents is None else setpoint_agents
+    patched_blocks = []
+    for block in display_blocks:
+        if '__AGENT__' in block:
+            display_agents = setpoint_agents if 'Setpoint' in block else agents
+            for agent in display_agents:
+                patched_blocks.append(block.replace('__AGENT__', agent))
+        elif block.strip():
+            patched_blocks.append(block)
+
+    content = (
+        content[:displays_start]
+        + ''.join(patched_blocks)
+        + content[enabled_start:]
+    )
+
+    content = content.replace('__MARKER_NS__', f'/{marker_namespace}' if marker_namespace else '')
 
     # Write to temporary file
     tmp_rviz_config = tempfile.NamedTemporaryFile(delete=False, suffix='.rviz')
@@ -140,11 +148,33 @@ def launch_setup(context, *args, **kwargs):
     """
     Function to set up the launch context and patch the RViz configuration.
     """
+    # Configure shared visualization for the current agent and its neighbors.
     namespace = LaunchConfiguration('namespace').perform(context)
+    name_others = LaunchConfiguration('name_others').perform(context).split()
+    agents = [namespace] + [name for name in name_others if name != namespace]
+    # Launch one shared visualizer and RViz instance.
+    visualizer = Node(
+        package='bsk-ros2-mpc',
+        namespace='',
+        executable='visualizer',
+        name='visualizer',
+        parameters=[
+            {'use_sim_time': LaunchConfiguration('use_sim_time')},
+            {'use_hill': LaunchConfiguration('use_hill')},
+            {'agents': ' '.join(agents)},
+        ],
+        condition=IfCondition(PythonExpression(["'", LaunchConfiguration('rviz_mode'), "' != 'off'"])),
+    )
     rviz_config_path = os.path.join(get_package_share_directory('bsk-ros2-mpc'), 'config', 'config.rviz')
-    patched_config = patch_rviz_config(rviz_config_path, namespace)
+    patched_config = patch_rviz_config(
+        rviz_config_path,
+        agents,
+        namespace,
+        setpoint_agents=[namespace],
+    )
 
     return [
+        visualizer,
         Node(
             package='rviz2',
             namespace='',

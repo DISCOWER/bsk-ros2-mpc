@@ -56,7 +56,7 @@ Visualization Manager:
       Enabled: true
       Head Length: 0.30000001192092896
       Head Radius: 0.10000000149011612
-      Name: Pose
+      Name: Pose __AGENT__
       Shaft Length: 1
       Shaft Radius: 0.05000000074505806
       Shape: Axes
@@ -66,7 +66,53 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: __NS__/bsk_visualizer/vehicle_pose
+        Value: /bsk_visualizer/__AGENT__/pose
+      Value: true
+    - Alpha: 0.7
+      Axes Length: 0.25
+      Axes Radius: 0.02
+      Class: rviz_default_plugins/Pose
+      Color: 0; 0; 255
+      Enabled: true
+      Head Length: 0.25
+      Head Radius: 0.06
+      Name: Setpoint Pose __AGENT__
+      Shaft Length: 0.25
+      Shaft Radius: 0.025
+      Shape: Axes
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /bsk_visualizer/__AGENT__/setpoint_pose
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Labels
+      Namespaces:
+        labels: true
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /bsk_visualizer/labels
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Collision Radius __AGENT__
+      Namespaces:
+        collision_radius: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /bsk_visualizer/__AGENT__/radii
       Value: true
     - Alpha: 0.7
       Buffer Length: 1
@@ -94,7 +140,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: __NS__/bsk_visualizer/vehicle_path
+        Value: /bsk_visualizer/__AGENT__/vehicle_path
       Value: true
     - Alpha: 0.7
       Buffer Length: 1
@@ -122,40 +168,16 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: __NS__/bsk_mpc/predicted_path
+        Value: /bsk_visualizer/__AGENT__/predicted_path
       Value: true
     - Class: rviz_default_plugins/InteractiveMarkers
       Enable Transparency: true
       Enabled: true
-      Interactive Markers Namespace: __NS__/rviz_target_pose_marker
+      Interactive Markers Namespace: __MARKER_NS__/rviz_target_pose_marker
       Name: InteractiveMarkers
       Show Axes: true
       Show Descriptions: true
       Show Visual Aids: false
-      Value: true
-    - Class: rviz_default_plugins/Marker
-      Enabled: true
-      Name: Marker
-      Namespaces:
-        arrow: true
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        Filter size: 10
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: __NS__/bsk_mpc/reference
-      Value: true
-    - Class: rviz_default_plugins/MarkerArray
-      Enabled: true
-      Name: Other Agents
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        Filter size: 10
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: __NS__/bsk_visualizer/other_agents_markers_array
       Value: true
   Enabled: true
   Global Options:

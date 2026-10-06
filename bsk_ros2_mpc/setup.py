@@ -26,7 +26,6 @@ setup(
     entry_points={
         'console_scripts': [
             'bsk-mpc = bsk_ros2_mpc.nodes.bsk_mpc_node:main',
-            'bsk-mpc-px4 = bsk_ros2_mpc.nodes.bsk_mpc_px4_node:main',
             'follower-publisher = bsk_ros2_mpc.planners.follower_publisher:main',
             'waypoint-publisher = bsk_ros2_mpc.planners.waypoint_publisher:main',
             'rviz_pose_marker = bsk_ros2_mpc.nodes.rviz_pose_marker_node:main',

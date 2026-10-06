@@ -81,6 +81,33 @@ This launches one MPC per namespace with a shared visualizer and RViz window.
 | `rviz_mode` | `setpoint` | RViz mode: `setpoint`, `viz`, or `off` |
 | `skip_build` | `False` | Skip acados solver codegen/build for subsequent agents |
 
+### Leader-Follower
+
+```bash
+ros2 launch bsk-ros2-mpc leader_followers_mpc.launch.py
+```
+
+By default, this launches `leaderSc` with followers `followerSc_1` and `followerSc_2`.
+Override the leader and follower namespaces with `leader` and `followers`:
+
+```bash
+ros2 launch bsk-ros2-mpc leader_followers_mpc.launch.py leader:=leaderSc followers:="followerSc_1 followerSc_2"
+```
+
+The launch starts the leader MPC, follower MPCs, waypoint publishers, and one shared visualizer and RViz window. Use `rviz_mode:=off` to disable the visualizer and RViz.
+
+#### Leader-Follower Launch Options
+
+| Argument | Default | Description |
+|---|---|---|
+| `leader` | `leaderSc` | Namespace of the leader spacecraft |
+| `followers` | `followerSc_1 followerSc_2` | Space-separated follower namespaces |
+| `use_sim_time` | `False` | Synchronize with `/clock` topic |
+| `type` | `wrench` | Leader controller type: `wrench` or `da` |
+| `use_hill` | `True` | Use Hill frame for MPC (when in orbit) |
+| `period` | `20.0` | Time in seconds spent at each leader waypoint |
+| `rviz_mode` | `viz` | RViz mode: `viz` or `off` |
+
 ## Troubleshooting
 
 **Missing `acados` dependencies**: If the launch fails during solver generation, ensure the Python package `acados_template` is installed and that `$ACADOS_SOURCE_DIR` is correctly exported in your `.bashrc`.

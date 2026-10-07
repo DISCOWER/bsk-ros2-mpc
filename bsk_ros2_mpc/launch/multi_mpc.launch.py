@@ -8,6 +8,7 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction, RegisterEventH
 from launch.event_handlers import OnProcessIO
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch.conditions import IfCondition
 
 def generate_launch_description():
@@ -116,7 +117,7 @@ def launch_setup(context, *args, **kwargs):
                 {'type': type},
                 {'use_hill': use_hill},
                 {'name_others': other_agents},
-                {'rviz_mode': rviz_mode},
+                {'rviz_mode': ParameterValue(rviz_mode, value_type=str)},
                 {'skip_build': skip_build if agent == agents[0] else True},
             ],
         ))

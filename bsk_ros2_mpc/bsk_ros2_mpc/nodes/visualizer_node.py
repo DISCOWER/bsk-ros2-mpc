@@ -6,13 +6,23 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 
 from bsk_msgs.msg import HillRelStateMsgPayload, AttGuidMsgPayload, SCStatesMsgPayload
-from geometry_msgs.msg import PoseStamped, Point
+from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
+from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
+from geometry_msgs.msg import TransformStamped
 from visualization_msgs.msg import Marker, MarkerArray
 
 class BskMpcVisualizer(Node):
     def __init__(self):
         super().__init__("visualizer")
+
+        self.map_tf_broadcaster = StaticTransformBroadcaster(self)
+        map_transform = TransformStamped()
+        map_transform.header.stamp = self.get_clock().now().to_msg()
+        map_transform.header.frame_id = 'world'
+        map_transform.child_frame_id = 'map'
+        map_transform.transform.rotation.w = 1.0
+        self.map_tf_broadcaster.sendTransform(map_transform)
 
         self.declare_parameter('use_hill', True)
         self.use_hill = self.get_parameter('use_hill').get_parameter_value().bool_value

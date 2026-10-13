@@ -28,12 +28,14 @@ def bsk_model_da(n_others=0):
     model.name = 'bsk_model_da'
 
     # parameters
-    F_thr = 1.5
-    rd_thruster = 0.17
-    mass = 17.8
+    F_thr = 1.0
+    mass = 12.0
     mass_inv = 1/mass
-    inertia = np.diag([0.315]*3)
+    inertia = np.diag([0.100, 0.130, 0.050])
     inertia_inv = np.linalg.inv(inertia)
+    thruster_offset_x = 0.10
+    thruster_offset_y = 0.05
+    thruster_offset_z = 0.15
 
     d_min_sqr = (0.6 * 1)**2
 
@@ -59,11 +61,11 @@ def bsk_model_da(n_others=0):
         ca.horzcat(0., 0., 1., 1., 0., 0.),
         ca.horzcat(0., 0., 0., 0., 1., 1.)
         )
-    B_T = F_thr * rd_thruster * ca.vertcat(
-        ca.horzcat(0., 0., 0., 0., 1., -1.),
-        ca.horzcat(1., -1., 0., 0., 0., 0.),
-        ca.horzcat(0., 0., 1., -1., 0., 0.)
-        )
+    B_T = F_thr * ca.vertcat(
+        ca.horzcat(0., 0., 0., 0., thruster_offset_y, -thruster_offset_y),
+        ca.horzcat(thruster_offset_z, -thruster_offset_z, 0., 0., 0., 0.),
+        ca.horzcat(0., 0., thruster_offset_x, -thruster_offset_x, 0., 0.)
+    )
     rotMat = get_rotMat(q)
     w_cross = ca.vertcat(
         ca.horzcat(0, -w[2], w[1]),

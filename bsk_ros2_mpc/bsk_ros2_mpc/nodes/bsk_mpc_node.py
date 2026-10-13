@@ -102,10 +102,12 @@ class BskMpc(Node):
         self.use_sim_time = self.get_parameter('use_sim_time').get_parameter_value().bool_value
         self.get_logger().info(f"Use sim time: {self.use_sim_time}")
         self.type = self.get_parameter('type').get_parameter_value().string_value
+        self.get_logger().info(f"Controller type: {self.type}")
         self.use_hill = self.get_parameter('use_hill').get_parameter_value().bool_value
         self.get_logger().info(f"Use Hill frame: {self.use_hill}")
         self.name_leader = self.get_parameter('name_leader').get_parameter_value().string_value
-        self.get_logger().info(f"Leader name: {self.name_leader}")
+        if self.type == 'follower_wrench':
+            self.get_logger().info(f"Leader name: {self.name_leader}")
         self.name_others = self.get_parameter('name_others').get_parameter_value().string_value
         self.name_others = self.name_others.split() if self.name_others else []
         self.n_others = len(self.name_others)
@@ -529,7 +531,7 @@ class BskMpc(Node):
         self.vehicle_angular_velocity_pub.publish(angular_velocity_msg)
 
     def publish_thruster_cmd(self, u):
-        Fthr = 1.5
+        Fthr = 1.0
         u = np.asarray(u).flatten()
 
         thr_array_msg = THRArrayCmdForceMsgPayload()

@@ -28,9 +28,9 @@ def bsk_model_wrench(n_others=0):
     model.name = 'bsk_model_wrench'
 
     # parameters
-    mass = 17.8
+    mass = 12.0
     mass_inv = 1/mass
-    inertia = np.diag([0.315]*3)
+    inertia = np.diag([0.100, 0.130, 0.050])
     inertia_inv = np.linalg.inv(inertia)
 
     d_min_sqr = (0.6 * 1)**2
@@ -69,10 +69,10 @@ def bsk_model_wrench(n_others=0):
     model.u = u
 
     # limits
-    F_lim = 2 * 1.5 * 2/3
-    T_lim = 2 * 0.17 * 1.5 * 1/3
-    model.u_min = np.array([-F_lim, -F_lim, -F_lim, -T_lim, -T_lim, -T_lim])
-    model.u_max = np.array([F_lim, F_lim, F_lim, T_lim, T_lim, T_lim])
+    F_lim = [2.0, 2.0, 2.0]
+    T_lim = [0.10, 0.30, 0.20]
+    model.u_min = np.array([-F_lim[0], -F_lim[1], -F_lim[2], -T_lim[0], -T_lim[1], -T_lim[2]])
+    model.u_max = np.array([F_lim[0], F_lim[1], F_lim[2], T_lim[0], T_lim[1], T_lim[2]])
 
     # parameters: other agents' positions at each timestep
     x_ref = ca.MX.sym('x_ref', x.size()[0])
